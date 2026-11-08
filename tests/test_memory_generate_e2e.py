@@ -76,17 +76,17 @@ def test_dislikes_of_homonyms_generated_paragraphs_and_button(world):
     raw = _gen_reply({1: [("Опоздания", "не любит опозданий", ids("m1_dis")),
                           ("Одиночество", "не любит ходить один", ids("m1_alone"))],
                       2: [("Жара", "не любит жару", ids("m2_dis"))]})
-    # группы идут в порядке resolve (по id людей): первый — Михаил Тестов, второй — Миша Образцов
-    bot = run("что не любит миша", raw)
+    # группы идут в порядке resolve (по id людей): первый — Артём Тестов, второй — Тёма Образцов
+    bot = run("что не любит тёма", raw)
     text_, kb = sent(bot)
     assert len(bot.results[0].groups) == 2
     gen_prompt = bot.gen_ask.await_args.kwargs["prompt"]
     assert "что не любит" in gen_prompt and "не любит опозданий" in gen_prompt
     assert "мать ругала" not in gen_prompt and "пьёт таблетки" not in gen_prompt   # неверно типизированные не входят
     paras = text_.split("\n\n")
-    assert paras[0].startswith("<b>Михаил Тестов (коллега)</b> не любит:\n• <b>Опоздания</b> — не любит опозданий")
+    assert paras[0].startswith("<b>Артём Тестов (коллега)</b> не любит:\n• <b>Опоздания</b> — не любит опозданий")
     assert "• <b>Одиночество</b>" in paras[0]
-    assert paras[1].startswith("<b>Миша Образцов</b> не любит:\n• <b>Жара</b>") and "добавлено вручную" in text_
+    assert paras[1].startswith("<b>Тёма Образцов</b> не любит:\n• <b>Жара</b>") and "добавлено вручную" in text_
     assert kb is not None and kb.inline_keyboard[0][0].text.startswith("Все факты (")
     assert kb.inline_keyboard[0][0].callback_data.startswith("memall:")
 
@@ -153,9 +153,9 @@ def test_expired_button_is_polite():
 
 def test_grounding_violation_falls_back_to_current_list(world):
     bad = _gen_reply({1: [("Опоздания", "не любит опозданий", [world["m1_dis"], 999999])]})
-    bot = run("что не любит миша", bad)
+    bot = run("что не любит тёма", bad)
     text_, kb = sent(bot)
-    assert "Михаил Тестов (коллега)" in text_ and "не любит опозданий" in text_      # прежний структурный список
+    assert "Артём Тестов (коллега)" in text_ and "не любит опозданий" in text_      # прежний структурный список
     assert "по фактам из" not in text_
     assert kb is not None and not any(
         b.callback_data.startswith("memall:") for row in kb.inline_keyboard for b in row)   # чекбоксы, не «Все факты»
@@ -165,7 +165,7 @@ def test_grounding_violation_falls_back_to_current_list(world):
 
 
 def test_llm_failure_falls_back_to_list(world):
-    bot = run("что не любит миша", "")
+    bot = run("что не любит тёма", "")
     text_, _ = sent(bot)
     assert "не любит опозданий" in text_ and "по фактам из" not in text_
 
@@ -193,5 +193,5 @@ def test_i_dont_eat_generated_only_from_my_facts(world):
 
 def test_flag_off_keeps_current_behavior(world, monkeypatch):
     monkeypatch.setenv("MEMORY_GENERATE_ANSWER", "0")
-    bot = run("что не любит миша", _gen_reply({1: [("Х", "не любит опозданий", [world["m1_dis"]])]}))
+    bot = run("что не любит тёма", _gen_reply({1: [("Х", "не любит опозданий", [world["m1_dis"]])]}))
     assert bot.gen_ask.await_count == 0 and "не любит опозданий" in sent(bot)[0]

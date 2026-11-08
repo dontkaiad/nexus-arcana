@@ -126,14 +126,14 @@ async def test_task_deadline_marked_not_today_in_prompt():
     """Задача с дедлайном на другой день помечена явно — иначе Haiku
     советует «звони прямо сейчас» задаче через неделю (реальный баг)."""
     claude_mock = AsyncMock(return_value=GOOD)
-    tasks = [{"title": "позвони Михаилу", "deadline_raw": "2026-05-27"}]
+    tasks = [{"title": "позвони Артёму", "deadline_raw": "2026-05-27"}]
     with patch.object(today_mod, "ask_claude", claude_mock), \
          patch.object(today_mod, "_adhd_context_memories", AsyncMock(return_value=[])), \
          patch.object(today_mod.cache, "get_tip", lambda *a, **k: None), \
          patch.object(today_mod.cache, "set_tip", lambda *a, **k: None):
         await today_mod._generate_adhd_tip(1, "2026-05-20", tasks, "")
     prompt = claude_mock.call_args.kwargs["prompt"]
-    assert "позвони Михаилу (срок: 2026-05-27, НЕ сегодня)" in prompt
+    assert "позвони Артёму (срок: 2026-05-27, НЕ сегодня)" in prompt
 
 
 @pytest.mark.asyncio

@@ -52,7 +52,7 @@ def test_recall_precision_math():
 
 
 def test_recall_is_sensitive_to_a_broken_pipeline():
-    """Эвал должен ПАДАТЬ, если поиск сломан (иначе он ничего не защищает): без понимания вопроса 'что не любит миша' → гибрид."""
+    """Эвал должен ПАДАТЬ, если поиск сломан (иначе он ничего не защищает): без понимания вопроса 'что не любит тёма' → гибрид."""
     with patch.dict("os.environ", {"MEMORY_QUERY_UNDERSTANDING": "0"}):
         res = memory_eval.run_offline()
     assert res["recall_at_5_pct"] < 100.0 or res["route_acc_pct"] < 100.0

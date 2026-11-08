@@ -18,7 +18,7 @@ import core.classifier as clf
 
 
 @pytest.mark.parametrize("text", [
-    "поставь длительность 2 часа для встречи с Мишаней",
+    "поставь длительность 2 часа для встречи с Тёмычем",
     "измени длительность на 30 минут",
     "поменяй продолжительность встречи на час",
 ])
@@ -48,9 +48,9 @@ def test_share_and_duration_re_do_not_overtrigger(negative):
 
 @pytest.mark.asyncio
 async def test_duration_edit_routes_to_edits_list_parser():
-    text = "поставь длительность 2 часа для встречи с Мишаней"
+    text = "поставь длительность 2 часа для встречи с Тёмычем"
     fake_response = json.dumps({
-        "type": "edit_record", "record_type": "task", "record_hint": "встреча с Мишаней",
+        "type": "edit_record", "record_type": "task", "record_hint": "встреча с Тёмычем",
         "edits": [{"field": "duration", "new_value": "2 часа"}],
     })
     with patch.object(clf, "ask_claude", AsyncMock(return_value=fake_response)):

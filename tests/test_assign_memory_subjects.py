@@ -109,7 +109,7 @@ def test_both_persons_always_check():
 def test_elided_kai_fragment_stays_unless_other_person_named():
     assert ms.attribution("не любит сигареты", "сигареты фу", "kai") == ("keep", "kai_elided")
     assert ms.attribution("х", "бесит идти рядом с ним", "kai") == ("check", "kai_no_marker")   # «ним» — другой человек
-    assert ms.attribution("х", "надо было отобрать у Лехи", "kai") == ("check", "kai_no_marker")
+    assert ms.attribution("х", "надо было отобрать у Саши", "kai") == ("check", "kai_no_marker")
     assert ms.attribution("х", "сигареты фу", "partner") == ("check", "partner_no_marker")   # у партнёра обрывок не берём
 
 
@@ -125,7 +125,7 @@ def test_cat_names_only_as_nickname():
     assert ms.keyword_category("Туча не любит воду", names) == "🐾 Коты"                   # кличка из таблицы
     assert ms.keyword_category("Тучка Юниверс любимый мультик", names) != "🐾 Коты"
     assert ms.keyword_category("не нравится мультик «Тучка Юниверс»", names) == "🎮 Хобби"
-    assert ms.keyword_category("Илюша спит", names) != "🐾 Коты"
+    assert ms.keyword_category("Ромка спит", names) != "🐾 Коты"
 
 
 def test_cat_names_are_not_hardcoded_without_names_only_cat_words_work():
@@ -168,7 +168,7 @@ def test_adhd_rule_not_triggered_by_substring_noise():
     ("🦋 СДВГ", "триггер_шум", [], "self"),
     ("🐾 Коты", "кот_еда", [], "cats"),
     ("👥 Люди", "маша", [5], "person"),
-    ("👥 Люди", "миша", [5, 6], "misc"),                         # тёзки — без догадок
+    ("👥 Люди", "тёма", [5, 6], "misc"),                         # тёзки — без догадок
     ("👥 Люди", "кто-то", [], "misc"),
     ("🏠 Быт", "батон", [], "misc"),
 ])

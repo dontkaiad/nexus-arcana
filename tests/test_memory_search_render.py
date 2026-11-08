@@ -45,10 +45,10 @@ def test_direct_facts_render_with_group_label_and_type_marks():
 
 def test_two_groups_for_homonyms():
     res = Result(route="direct", kind="facts", subject="ambiguous", types=("likes",), groups=[
-        Group(label="Михаил Тестов", person_id=1, hits=[_hit(1, "любит джаз", "likes", 1)]),
-        Group(label="Миша Образцов", person_id=2, hits=[_hit(2, "любит рок", "likes", 2)])])
+        Group(label="Артём Тестов", person_id=1, hits=[_hit(1, "любит джаз", "likes", 1)]),
+        Group(label="Тёма Образцов", person_id=2, hits=[_hit(2, "любит рок", "likes", 2)])])
     text = _run(res).args[0]
-    assert "Михаил Тестов" in text and "Миша Образцов" in text and text.index("джаз") < text.index("Миша Образцов")
+    assert "Артём Тестов" in text and "Тёма Образцов" in text and text.index("джаз") < text.index("Тёма Образцов")
 
 
 def test_direct_empty_is_honest_dont_know():

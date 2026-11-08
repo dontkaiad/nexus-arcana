@@ -114,23 +114,23 @@ async def test_single_known_person_gets_the_fact():
 
 @pytest.mark.asyncio
 async def test_homonyms_ask_with_labels_and_write_nothing():
-    a = _person("Миша Ари", ["Миша"], relation="friend", about="коллега по проекту")
-    b = _person("Миша Бе", ["Миша"], relation="family")
+    a = _person("Тёма Лисов", ["Тёма"], relation="friend", about="коллега по проекту")
+    b = _person("Тёма Бор", ["Тёма"], relation="family")
     before = _count()
-    r = await _store("Миша любит чай", _reply("Миша любит чай", "👥 Люди", "Миша", "миша_чай"))
+    r = await _store("Тёма любит чай", _reply("Тёма любит чай", "👥 Люди", "Тёма", "миша_чай"))
     assert r["kind"] == "choose_person" and _count() == before
     labels = {c["id"]: c["label"] for c in r["ask"]["candidates"]}
-    assert labels[a] == "Миша Ари — друг, коллега по проекту" and labels[b] == "Миша Бе — семья"
+    assert labels[a] == "Тёма Лисов — друг, коллега по проекту" and labels[b] == "Тёма Бор — семья"
     res = await mem.finish_route(MARK, r["ask"], {"person_id": b})
     assert res["kind"] == "memory" and _row(res["memory_id"]).person_id == b
 
 
 @pytest.mark.asyncio
 async def test_choice_outside_candidates_is_refused():
-    _person("Миша Ари", ["Миша"])
-    _person("Миша Бе", ["Миша"])
+    _person("Тёма Лисов", ["Тёма"])
+    _person("Тёма Бор", ["Тёма"])
     stranger = _person("Гоша", ["Гоша"])
-    r = await _store("Миша любит чай", _reply("Миша любит чай", "👥 Люди", "Миша", "миша_чай"))
+    r = await _store("Тёма любит чай", _reply("Тёма любит чай", "👥 Люди", "Тёма", "миша_чай"))
     assert (await mem.finish_route(MARK, r["ask"], {"person_id": stranger}))["kind"] == "error"
     assert _count() == 0
 

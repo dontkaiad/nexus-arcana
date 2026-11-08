@@ -3,7 +3,7 @@
 
 set -e
 
-PROJECT_DIR="${PROJECT_DIR:-/Users/dontkaiad/PROJECTS/ai-agents/AI_AGENTS}"
+PROJECT_DIR="${PROJECT_DIR:-$HOME/PROJECTS/ai-agents/AI_AGENTS}"
 DECKS_DIR="$PROJECT_DIR/miniapp/frontend/public/decks"
 UA='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 

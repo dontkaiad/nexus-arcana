@@ -19,7 +19,7 @@ def clean_about(about: Optional[str]) -> Optional[str]:
 
 
 def person_label(name: str, relation: Optional[str] = None, about: Optional[str] = None) -> str:
-    """«Миша Ари — друг, коллега по проекту». Без relation/about — просто имя. «другое» отдельно не пишем,
+    """«Тёма Лисов — друг, коллега по проекту». Без relation/about — просто имя. «другое» отдельно не пишем,
     если есть about (about и так объясняет), и пишем «другое» только когда пояснения нет."""
     rel = RELATIONS.get(relation or "")
     ab = clean_about(about)
@@ -354,7 +354,7 @@ def alias_forms(alias: str, phrase_only: bool = True) -> List[str]:
 
 def aliases_norm_for(name: str, aliases: Iterable[str], phrase_only: bool = True) -> List[str]:
     """Формы имени и «Других имён» (username'ы аккаунтов сюда не входят: тема PR-7 — отдельная таблица).
-    Имя из нескольких слов ищется и по отдельным словам («Миша Ари» ← «Миша»); многословные алиасы — только
+    Имя из нескольких слов ищется и по отдельным словам («Тёма Лисов» ← «Тёма»); многословные алиасы — только
     фразой целиком (см. alias_forms)."""
     seen: List[str] = []
     for f in norm_forms(name, expand=True):

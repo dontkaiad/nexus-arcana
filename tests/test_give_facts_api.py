@@ -56,13 +56,13 @@ def _row(fid):
 
 def test_give_moves_fact_keeps_type_and_category_and_confirms(client):
     me = _me()
-    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    nik = prepo.create(MARK, "Игорь", ["Игорь"], status="confirmed")
     f = _fact(me, "не любит жару", chat=111)
     r = client.post(f"/api/people/{me}/facts/give", json={"ids": [f], "to_person_id": nik}).json()
     assert r["moved"] == 1 and r["to_person_id"] == nik
     row = _row(f)
     assert row.person_id == nik and row.review_status == "confirmed" and row.category == "👥 Люди"          # «❓» → «Люди»
-    assert row.key_name.startswith(f"person_{nik}_dislikes_") and row.related_to.startswith("Никита")      # тип из старого ключа
+    assert row.key_name.startswith(f"person_{nik}_dislikes_") and row.related_to.startswith("Игорь")      # тип из старого ключа
     client.spawn.assert_called_once()
     cards = [x["id"] for g in client.get(f"/api/people/{me}").json()["facts"] for x in g["items"]]
     assert f not in cards
@@ -82,7 +82,7 @@ def test_give_many_and_new_person(client):
 
 def test_give_is_reversible_back_to_self(client):
     me = _me()
-    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    nik = prepo.create(MARK, "Игорь", ["Игорь"], status="confirmed")
     f = _fact(me, "не любит жару")
     client.post(f"/api/people/{me}/facts/give", json={"ids": [f], "to_person_id": nik})
     assert client.get(f"/api/people/{nik}").json()["self_id"] == me
@@ -95,7 +95,7 @@ def test_give_is_reversible_back_to_self(client):
 
 def test_other_self_category_is_kept_both_ways(client):
     me = _me()
-    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    nik = prepo.create(MARK, "Игорь", ["Игорь"], status="confirmed")
     f = _fact(me, "любит чай", cat="🛒 Предпочтения", typ="likes")
     client.post(f"/api/people/{me}/facts/give", json={"ids": [f], "to_person_id": nik})
     assert _row(f).category == "🛒 Предпочтения"                          # обычная категория сохраняется
@@ -105,7 +105,7 @@ def test_other_self_category_is_kept_both_ways(client):
 
 def test_duplicate_at_target_is_a_conflict_not_a_loss(client):
     me = _me()
-    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    nik = prepo.create(MARK, "Игорь", ["Игорь"], status="confirmed")
     from core.people import fact_hash
     f = _fact(me, "не любит жару")
     with get_engine().begin() as c:                      # у Никиты уже есть такой же факт
@@ -118,7 +118,7 @@ def test_duplicate_at_target_is_a_conflict_not_a_loss(client):
 
 def test_give_validation(client):
     me = _me()
-    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    nik = prepo.create(MARK, "Игорь", ["Игорь"], status="confirmed")
     bad = prepo.create(MARK, "Плохой", ["Плохой"], status="pending")
     with get_engine().begin() as c:
         c.execute(text("UPDATE people SET status = 'rejected' WHERE id = :i"), {"i": bad})
@@ -140,7 +140,7 @@ def test_give_validation(client):
 
 def test_foreign_fact_is_skipped(client):
     me = _me()
-    nik = prepo.create(MARK, "Никита", ["Никита"], status="confirmed")
+    nik = prepo.create(MARK, "Игорь", ["Игорь"], status="confirmed")
     oly = prepo.create(MARK, "Оля", ["Оля"], status="confirmed")
     g = _fact(oly, "чужой")
     r = client.post(f"/api/people/{me}/facts/give", json={"ids": [g], "to_person_id": nik}).json()

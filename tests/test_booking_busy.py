@@ -151,17 +151,17 @@ async def test_pending_and_confirmed_bookings_hold_slot_with_real_span():
 
 @pytest.mark.asyncio
 async def test_booking_label_combines_requester_name_and_topic():
-    """Регрессия: label показывал ТОЛЬКО имя забронировавшего ("Никита"),
+    """Регрессия: label показывал ТОЛЬКО имя забронировавшего ("Олег"),
     без темы встречи (booking.note, "зачем забронировали") — Кай хотела
     видеть и то, и другое."""
     eng = _make_engine()
     with eng.begin() as c:
         c.execute(sa.text(
             "INSERT INTO booking (user_id, start_at, end_at, status, token, requester_name, note) "
-            "VALUES ('u1', :s, :e, 'confirmed', 't1', 'Никита', 'Секс в Актобе')"),
+            "VALUES ('u1', :s, :e, 'confirmed', 't1', 'Олег', 'Встреча')"),
             {"s": _iso(T0 + timedelta(hours=2)), "e": _iso(T0 + timedelta(hours=4))})
     res = await _run(eng)
-    assert res[0].label == "Никита · Секс в Актобе"
+    assert res[0].label == "Олег · Встреча"
 
 
 @pytest.mark.asyncio
@@ -170,10 +170,10 @@ async def test_booking_label_falls_back_to_whichever_field_is_present():
     with eng.begin() as c:
         c.execute(sa.text(
             "INSERT INTO booking (user_id, start_at, end_at, status, token, requester_name, note) "
-            "VALUES ('u1', :s, :e, 'confirmed', 't1', 'Никита', '')"),
+            "VALUES ('u1', :s, :e, 'confirmed', 't1', 'Олег', '')"),
             {"s": _iso(T0 + timedelta(hours=2)), "e": _iso(T0 + timedelta(hours=4))})
     res = await _run(eng)
-    assert res[0].label == "Никита"
+    assert res[0].label == "Олег"
 
 
 @pytest.mark.asyncio
@@ -214,7 +214,7 @@ async def test_task_duration_min_overrides_default_hour():
     ns = _status_id(eng, "task_status", "Not started")
     with eng.begin() as c:
         c.execute(sa.text("INSERT INTO tasks (title, deadline, status_id, duration_min, user_id) VALUES "
-                          "('встреча с Мишаней', :d, :s, 120, 'u1')"),
+                          "('встреча с Тёмычем', :d, :s, 120, 'u1')"),
                   {"d": _iso(T0 + timedelta(hours=5)), "s": ns})
     res = await _run(eng)
     assert len(res) == 1

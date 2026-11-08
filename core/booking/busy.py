@@ -172,7 +172,7 @@ def _busy_sync(engine, user_id: str, start: datetime, end: datetime) -> List[Bus
             bs, be = _as_utc(row.start_at), _as_utc(row.end_at)
             if bs is None or be is None:
                 continue
-            # #26x: раньше label = только requester_name ("Никита") — тема
+            # #26x: раньше label = только requester_name ("Олег") — тема
             # брони (note, "зачем забронировали") нигде не показывалась,
             # хотя для линкованной Nexus-задачи в этот же label шёл title
             # (повод). Формат "Имя · тема" — симметрично с task/work.

@@ -29,13 +29,13 @@ def result(groups, types=("dislikes",), route="direct", kind="facts", subject="p
     return Result(route=route, kind=kind, subject=subject, types=tuple(types), groups=gs)
 
 
-MISHA = [mem(1, "не любит спешку и смену планов"), mem(2, "не любит очереди"),
+TYOMA = [mem(1, "не любит спешку и смену планов"), mem(2, "не любит очереди"),
          mem(3, "не любит, когда его считают тупым", plat="vk", date="2025-02-10")]
 
 
 @pytest.fixture
 def res():
-    return result([("Миша Ари", 67, MISHA)])
+    return result([("Тёма Лисов", 67, TYOMA)])
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +57,7 @@ GOOD = {"blocks": [{"group": 1, "lines": [
 def gen(res, raw, **kw):
     ask = AsyncMock(return_value=raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False))
     with patch.object(ma, "ask_claude", ask):
-        out = asyncio.run(ma.generate(res, "что не любит миша", **kw))
+        out = asyncio.run(ma.generate(res, "что не любит тёма", **kw))
     return out, ask
 
 
@@ -65,12 +65,12 @@ def gen(res, raw, **kw):
 
 def test_eligibility(res):
     assert ma.eligible(res)
-    one = result([("Миша", 1, MISHA[:1])])
+    one = result([("Тёма", 1, TYOMA[:1])])
     assert not ma.eligible(one)                                   # один факт — как есть, без LLM
-    assert not ma.eligible(result([("Миша", 1, MISHA)], route="birthday", kind="birthday"))
-    assert not ma.eligible(result([("Миша", 1, MISHA)], route="unknown_person", kind="unknown_person"))
-    assert not ma.eligible(result([("Миша", 1, MISHA)], kind="none"))
-    assert ma.eligible(result([("", None, MISHA)], route="hybrid_self", subject="self"))
+    assert not ma.eligible(result([("Тёма", 1, TYOMA)], route="birthday", kind="birthday"))
+    assert not ma.eligible(result([("Тёма", 1, TYOMA)], route="unknown_person", kind="unknown_person"))
+    assert not ma.eligible(result([("Тёма", 1, TYOMA)], kind="none"))
+    assert ma.eligible(result([("", None, TYOMA)], route="hybrid_self", subject="self"))
 
 
 def test_flag_off_disables(monkeypatch, res):
@@ -89,10 +89,10 @@ def test_build_groups_limits_and_prompt():
 
 
 def test_prompt_contains_only_facts_of_result(res):
-    p = ma.build_prompt("что не любит миша", ma.build_groups(res), res.types)
-    for m in MISHA:
+    p = ma.build_prompt("что не любит тёма", ma.build_groups(res), res.types)
+    for m in TYOMA:
         assert m.fact in p
-    assert "Миша Ари" in p
+    assert "Тёма Лисов" in p
 
 
 # ── успех ────────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ def test_success_assembles_bullets_and_source_line(res):
     out, ask = gen(res, GOOD)
     assert out.ok and out.used_ids == [1, 2, 3]
     head, *bullets = out.text.split("\n\n")[0].split("\n")
-    assert head == "<b>Миша Ари</b> не любит:"
+    assert head == "<b>Тёма Лисов</b> не любит:"
     assert bullets == ["• <b>Планы</b> — спешка, смена планов", "• <b>Очереди</b> — не любит очереди",
                        "• <b>Оценка</b> — считают тупым"]
     assert "по фактам из TG/VK, 2024–2025" in out.text
@@ -118,24 +118,24 @@ def test_arcana_voice_and_model_rollback_by_env(monkeypatch, res):
 
 
 def test_homonyms_separate_paragraphs_with_labels():
-    a, b = MISHA[:2], [mem(11, "не любит жару"), mem(12, "не любит шум")]
-    r = result([("Михаил Тестов (коллега)", 1, a), ("Миша Образцов", 2, b)])
+    a, b = TYOMA[:2], [mem(11, "не любит жару"), mem(12, "не любит шум")]
+    r = result([("Артём Тестов (коллега)", 1, a), ("Тёма Образцов", 2, b)])
     raw = {"blocks": [{"group": 1, "lines": [{"t": "Спешка", "n": "не любит спешку", "ids": [1]},
                                              {"t": "Очереди", "n": "не любит очереди", "ids": [2]}]},
                       {"group": 2, "lines": [{"t": "Среда", "n": "жара, шум", "ids": [11, 12]}]}]}
     out, _ = gen(r, raw)
     assert out.ok
     paras = out.text.split("\n\n")
-    assert paras[0].startswith("<b>Михаил Тестов (коллега)</b> не любит:\n• <b>Спешка</b>")
-    assert paras[1].startswith("<b>Миша Образцов</b> не любит:\n• <b>Среда</b> — жара, шум")
+    assert paras[0].startswith("<b>Артём Тестов (коллега)</b> не любит:\n• <b>Спешка</b>")
+    assert paras[1].startswith("<b>Тёма Образцов</b> не любит:\n• <b>Среда</b> — жара, шум")
 
 
-# ── тёзки всегда оба (регрессия: блок Михаила пропал) ────────────────────────
+# ── тёзки всегда оба (регрессия: блок Артёма пропал) ────────────────────────
 
 def _two_groups():
     a = [mem(1, "не любит спешку"), mem(2, "не любит очереди")]
     b = [mem(11, "не любит жару"), mem(12, "не любит шум")]
-    return result([("Михаил Тестов", 1, a), ("Миша Образцов", 2, b)])
+    return result([("Артём Тестов", 1, a), ("Тёма Образцов", 2, b)])
 
 
 def test_homonym_whose_lines_all_fail_check_still_appears_via_deterministic_line():
@@ -145,15 +145,15 @@ def test_homonym_whose_lines_all_fail_check_still_appears_via_deterministic_line
     out, _ = gen(_two_groups(), raw)
     assert out.ok
     p1, p2 = out.text.split("\n\n")[:2]
-    assert p1.startswith("<b>Михаил Тестов</b> не любит:") and "• не любит спешку" in p1 and "• не любит очереди" in p1
-    assert p2.startswith("<b>Миша Образцов</b> не любит:\n• <b>Среда</b>")
+    assert p1.startswith("<b>Артём Тестов</b> не любит:") and "• не любит спешку" in p1 and "• не любит очереди" in p1
+    assert p2.startswith("<b>Тёма Образцов</b> не любит:\n• <b>Среда</b>")
     assert out.used_ids == [1, 2, 11, 12] and out.reason.startswith("dropped:4c")
 
 
 def test_homonym_missing_from_model_answer_still_appears():
     raw = {"blocks": [{"group": 2, "lines": [{"t": "Среда", "n": "жара, шум", "ids": [11, 12]}]}]}
     out, _ = gen(_two_groups(), raw)
-    assert out.ok and "<b>Михаил Тестов</b>" in out.text and "• не любит спешку" in out.text
+    assert out.ok and "<b>Артём Тестов</b>" in out.text and "• не любит спешку" in out.text
 
 
 def test_first_group_cannot_eat_the_second_groups_budget():
@@ -199,7 +199,7 @@ def test_check2_foreign_id_dropped(res):
 
 
 def test_check2_id_from_other_group_dropped():
-    r = result([("А", 1, MISHA[:2]), ("Б", 2, [mem(11, "не любит жару"), mem(12, "не любит шум")])])
+    r = result([("А", 1, TYOMA[:2]), ("Б", 2, [mem(11, "не любит жару"), mem(12, "не любит шум")])])
     _bad(r, [{"group": 1, "lines": [{"t": "жару", "ids": [11]}]}], "2", [11])        # тёзок не смешиваем
 
 
@@ -240,7 +240,7 @@ def test_long_line_allowed_when_cited_facts_are_long():
 
 def test_size_overflow_is_trimmed_not_dropped():
     facts = [mem(100 + i, f"не любит вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}") for i in range(10)]
-    r = result([("Миша", 1, facts)])
+    r = result([("Тёма", 1, facts)])
     lines = [{"t": f"Тема{chr(97 + i)}", "n": f"вещь{chr(97 + i)}{chr(97 + i)}{chr(97 + i)}", "ids": [100 + i]} for i in range(10)]
     out, _ = gen(r, {"blocks": [{"group": 1, "lines": lines}]})
     assert out.ok

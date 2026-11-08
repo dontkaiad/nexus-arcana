@@ -7,7 +7,7 @@
 
 set -e
 
-PROJECT_DIR="/Users/dontkaiad/PROJECTS/ai-agents/AI_AGENTS"
+PROJECT_DIR="${PROJECT_DIR:-$HOME/PROJECTS/ai-agents/AI_AGENTS}"
 ENV_FILE="$PROJECT_DIR/.env"
 
 # Load bot token

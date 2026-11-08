@@ -121,23 +121,23 @@ def test_rejected_person_not_resolved_so_unknown():
 # ── тёзки ────────────────────────────────────────────────────────────────────
 
 def test_homonyms_give_two_labeled_groups_with_notes():
-    a = person("Михаил Тестов", ["Миша"], notes="коллега")
-    b = person("Миша Образцов", ["Миша"])
+    a = person("Артём Тестов", ["Тёма"], notes="коллега")
+    b = person("Тёма Образцов", ["Тёма"])
     fa = _fact(a, "dislikes", "не любит опозданий")
     fb = _fact(b, "dislikes", "не любит жару")
-    res = run("что не любит миша")
+    res = run("что не любит тёма")
     assert res.subject == "ambiguous" and len(res.groups) == 2
     by = {g.person_id: g for g in res.groups}
-    assert by[a].label == "Михаил Тестов (коллега)" and by[b].label == "Миша Образцов"
+    assert by[a].label == "Артём Тестов (коллега)" and by[b].label == "Тёма Образцов"
     assert [h.memory.id for h in by[a].hits] == [str(fa)] and [h.memory.id for h in by[b].hits] == [str(fb)]
 
 
-def test_diminutive_does_not_match_misha():
-    a = person("Михаил Тестов", ["Миша"])
-    other = person("Мишаня")
+def test_diminutive_does_not_match_tyoma():
+    a = person("Артём Тестов", ["Тёма"])
+    other = person("Тёмыч")
     _fact(a, "likes", "любит джаз")
     _fact(other, "likes", "любит рок")
-    res = run("что любит миша")
+    res = run("что любит тёма")
     assert [g.person_id for g in res.groups] == [a]
 
 
