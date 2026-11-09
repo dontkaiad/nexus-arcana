@@ -93,6 +93,7 @@ def client_ip(peer: Optional[str], forwarded_for: Optional[str]) -> str:
 
 def _enabled() -> bool:
     return (len(config.cats_read_token or "") >= MIN_TOKEN_LEN
+            and (config.cats_read_token or "") != (config.cats_write_token or "")      # токен записи здоровья не взаимозаменяем с читающим
             and bool(config.cats_read_owner_tg_id)
             and config.cats_read_owner_tg_id in config.allowed_ids)
 

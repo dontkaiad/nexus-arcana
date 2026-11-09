@@ -27,6 +27,7 @@ def _enabled() -> bool:
             and tok != (config.cats_read_token or "")
             and tok != (config.sitter_lists_token or "")
             and tok != (config.care_period_token or "")
+            and tok != (config.cats_write_token or "")
             and bool(config.care_write_owner_tg_id)
             and config.care_write_owner_tg_id in config.allowed_ids)
 
