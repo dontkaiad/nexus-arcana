@@ -31,23 +31,61 @@ def local_today(tz_offset: int) -> date:
 
 
 def get_period(user_id: str) -> Optional[Dict[str, Any]]:
+    """{starts_on, ends_on, source}: source 'manual' (владелец, переопределение) | 'auto' (из дат доступа ситтеров)."""
     if not user_id:
         return None
     with get_engine().connect() as c:
-        r = c.execute(select(care_periods.c.starts_on, care_periods.c.ends_on).where(care_periods.c.user_id == user_id)).first()
-    return {"starts_on": r.starts_on, "ends_on": r.ends_on} if r else None
+        r = c.execute(select(care_periods.c.starts_on, care_periods.c.ends_on, care_periods.c.source)
+                      .where(care_periods.c.user_id == user_id)).first()
+    return {"starts_on": r.starts_on, "ends_on": r.ends_on, "source": r.source} if r else None
 
 
-def set_period(user_id: str, starts_on: date, ends_on: date) -> None:
+def _check_dates(starts_on: date, ends_on: date) -> None:
     if ends_on < starts_on:
         raise ValueError("ends_on before starts_on")
     if (ends_on - starts_on).days > MAX_PERIOD_DAYS:
         raise ValueError("period too long")
+
+
+def set_period(user_id: str, starts_on: date, ends_on: date) -> None:
+    """Период задаёт ВЛАДЕЛЕЦ (/care_period, Mini App): source='manual' — переопределение, автосинхронизация его не трогает."""
+    _check_dates(starts_on, ends_on)
     with get_engine().begin() as c:
         c.execute(text(
-            "INSERT INTO care_periods (user_id, starts_on, ends_on) VALUES (:u, :s, :e) "
-            "ON CONFLICT (user_id) DO UPDATE SET starts_on = EXCLUDED.starts_on, ends_on = EXCLUDED.ends_on"),
+            "INSERT INTO care_periods (user_id, starts_on, ends_on, source) VALUES (:u, :s, :e, 'manual') "
+            "ON CONFLICT (user_id) DO UPDATE SET starts_on = EXCLUDED.starts_on, ends_on = EXCLUDED.ends_on, source = 'manual'"),
             {"u": user_id, "s": starts_on, "e": ends_on})
+
+
+def apply_auto_period(user_id: str, starts_on: Optional[date], ends_on: Optional[date]) -> Dict[str, Any]:
+    """Период из дат доступа ситтеров (присылает cats отдельным токеном). Даты None/None — «периода нет».
+    Ручной период (source='manual') НЕ перезаписывается и не снимается: {applied: False, reason: 'manual_override'}.
+    → {applied, changed, period | None}. Идемпотентно; гонка с ручной установкой всегда заканчивается ручным значением."""
+    if (starts_on is None) != (ends_on is None):
+        raise ValueError("both dates or none")
+    if starts_on is not None:
+        _check_dates(starts_on, ends_on)
+    with get_engine().begin() as c:
+        cur = c.execute(select(care_periods.c.starts_on, care_periods.c.ends_on, care_periods.c.source)
+                        .where(care_periods.c.user_id == user_id).with_for_update()).first()
+        if cur and cur.source == "manual":
+            return {"applied": False, "reason": "manual_override", "changed": False,
+                    "period": {"starts_on": cur.starts_on, "ends_on": cur.ends_on, "source": "manual"}}
+        if starts_on is None:
+            if cur:
+                c.execute(care_periods.delete().where(care_periods.c.user_id == user_id, care_periods.c.source == "auto"))
+            return {"applied": True, "changed": bool(cur), "period": None}
+        c.execute(text(
+            "INSERT INTO care_periods (user_id, starts_on, ends_on, source) VALUES (:u, :s, :e, 'auto') "
+            "ON CONFLICT (user_id) DO UPDATE SET starts_on = EXCLUDED.starts_on, ends_on = EXCLUDED.ends_on "
+            "WHERE care_periods.source <> 'manual'"), {"u": user_id, "s": starts_on, "e": ends_on})
+        now = c.execute(select(care_periods.c.starts_on, care_periods.c.ends_on, care_periods.c.source)
+                        .where(care_periods.c.user_id == user_id)).first()
+    if now.source == "manual":                                       # владелец успел поставить свой период между чтением и записью
+        return {"applied": False, "reason": "manual_override", "changed": False,
+                "period": {"starts_on": now.starts_on, "ends_on": now.ends_on, "source": "manual"}}
+    changed = not cur or (cur.starts_on, cur.ends_on) != (starts_on, ends_on)
+    return {"applied": True, "changed": changed, "period": {"starts_on": starts_on, "ends_on": ends_on, "source": "auto"}}
 
 
 def clear_period(user_id: str) -> bool:

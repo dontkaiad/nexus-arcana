@@ -108,6 +108,14 @@ def test_migration_schema_and_partial_unique_on_cycle():
             c.execute(insert(task_completions).values(task_id=tid, cycle_due=due))
 
 
+def _restore_later_care_periods_migration():
+    path = next((REPO / "alembic" / "versions").glob("*_care_periods_source.py"))
+    spec = importlib.util.spec_from_file_location("_mig_period_source_restore", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    m.upgrade()
+
+
 def test_migration_up_down_reversible_keeps_tasks():
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
@@ -119,6 +127,7 @@ def test_migration_up_down_reversible_keeps_tasks():
             assert "care_periods" not in inspect(conn).get_table_names()
             assert conn.execute(text("SELECT count(*) FROM tasks WHERE id = :i"), {"i": tid}).scalar() == 1
             mig.upgrade()
+            _restore_later_care_periods_migration()      # c1a7… пересоздаёт care_periods без колонки source (миграция a7c3e1b9d452): вернуть её
 
 
 # ── период ────────────────────────────────────────────────────────────────────
@@ -127,7 +136,7 @@ def test_period_set_replace_clear_and_active_window():
     today = date(2026, 12, 10)
     care.set_period(MARK, date(2026, 12, 1), date(2026, 12, 31))
     care.set_period(MARK, date(2026, 12, 5), date(2027, 1, 5))               # заменяет, а не добавляет
-    assert care.get_period(MARK) == {"starts_on": date(2026, 12, 5), "ends_on": date(2027, 1, 5)}
+    assert care.get_period(MARK) == {"starts_on": date(2026, 12, 5), "ends_on": date(2027, 1, 5), "source": "manual"}
     with get_engine().connect() as c:
         assert c.execute(select(care_periods.c.id).where(care_periods.c.user_id == MARK)).fetchall().__len__() == 1
     assert care.is_active(MARK, 3, on=today) and care.is_active(MARK, 3, on=date(2026, 12, 5)) and care.is_active(MARK, 3, on=date(2027, 1, 5))
@@ -145,7 +154,7 @@ def test_period_endpoints_owner_only_and_validated():
     c = owner()
     assert c.get("/api/care/period").json()["period"] is None
     r = c.put("/api/care/period", json={"starts_on": "2026-12-01", "ends_on": "2027-01-31"})
-    assert r.json() == {"ok": True, "period": {"starts_on": "2026-12-01", "ends_on": "2027-01-31"}}
+    assert r.json() == {"ok": True, "period": {"starts_on": "2026-12-01", "ends_on": "2027-01-31", "source": "manual"}}
     assert c.get("/api/care/period").json()["period"]["ends_on"] == "2027-01-31"
     assert c.put("/api/care/period", json={"starts_on": "2027-02-01", "ends_on": "2027-01-01"}).status_code == 400
     assert c.put("/api/care/period", json={"starts_on": "не дата", "ends_on": "2027-01-01"}).status_code == 422

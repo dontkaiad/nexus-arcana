@@ -162,6 +162,8 @@ class AppConfig:
     # Запись ситтера в расписание ухода (выполнить цикл / перенести): ОТДЕЛЬНЫЙ токен, не равный остальным.
     care_write_token: str = ""
     care_write_owner_tg_id: int = 0
+    care_period_token: str = ""            # ОТДЕЛЬНЫЙ токен cats → Nexus: только PUT /api/care/period/auto
+    care_period_owner_tg_id: int = 0
     # Свободный текст о Кай для Zarya-промпта (#228). НИКОГДА не хардкодить
     # реальные факты в коде — репо публичный. Живёт только в .env на сервере,
     # правится напрямую там; пусто → Заря просто без доп. контекста о Кай.
@@ -192,6 +194,8 @@ def load_config() -> AppConfig:
         sitter_lists_owner_tg_id = _int_or_zero(_optional("SITTER_LISTS_OWNER_TG_ID")),
         care_write_token     = _optional("CARE_WRITE_TOKEN").strip(),
         care_write_owner_tg_id = _int_or_zero(_optional("CARE_WRITE_OWNER_TG_ID")),
+        care_period_token    = _optional("CARE_PERIOD_TOKEN").strip(),
+        care_period_owner_tg_id = _int_or_zero(_optional("CARE_PERIOD_OWNER_TG_ID")),
         booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
         booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
         zarya_kai_context    = _optional("ZARYA_KAI_CONTEXT"),
