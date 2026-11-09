@@ -91,7 +91,19 @@
         ]
       }
     ],
-    "general_count": 1
+    "general_count": 1,
+    "care": [
+      {
+        "label": "лотки",
+        "last_done_at": "<timestamp>",
+        "last_done_by": "sitter"
+      },
+      {
+        "label": "вода",
+        "last_done_at": null,
+        "last_done_by": null
+      }
+    ]
   },
   "card": {
     "id": 1,

@@ -6,6 +6,7 @@ import CatAvatar from './CatAvatar'
 import CatCard from './CatCard'
 import CatForm from './CatForm'
 import GeneralFacts from './GeneralFacts'
+import { careLines } from './careBlock'
 import { listCats } from './catsApi'
 
 // Раздел «Коты»: полноэкранный оверлей над Mini App (как «Люди»). Список строится от таблицы cats,
@@ -46,6 +47,14 @@ export default function CatsTab({ s, Sheet, onClose, onChanged, initialId }) {
 
           {data === null && <Note s={s}>Загружаю…</Note>}
           {err && <Note s={s} color={redText(s)}>{err}</Note>}
+          {careLines(data?.care).length > 0 && (
+            <div className="glass" aria-label="последний раз" style={{ padding: '8px 14px', marginBottom: 8 }}>
+              <div style={{ fontSize: fs(11), color: s.text, opacity: 0.7, marginBottom: 2 }}>Последний раз</div>
+              {careLines(data.care).map((line) => (
+                <div key={line} style={{ fontSize: fs(13), color: s.text, wordBreak: 'break-word' }}>{line}</div>
+              ))}
+            </div>
+          )}
           {data && data.total === 0 && !err && (
             <Note s={s}>Котов пока нет. Заведи карточку («+ Кот»): бот начнёт привязывать к ней факты из сообщений.</Note>
           )}

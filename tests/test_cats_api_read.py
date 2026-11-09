@@ -77,7 +77,7 @@ def test_list_hides_rejected_and_other_users_cats(api):
 
 
 def test_list_empty(api):
-    assert api.get("/api/cats").json() == {"total": 0, "cats": [], "general_count": 0}
+    assert api.get("/api/cats").json() == {"total": 0, "cats": [], "general_count": 0, "care": []}
 
 
 # ── карточка ─────────────────────────────────────────────────────────────────

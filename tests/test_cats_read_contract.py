@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, insert, text
 
 from core.cats import cat_fact_key
 from core.config import config
@@ -47,6 +47,7 @@ def _env(monkeypatch):
     with get_engine().begin() as c:
         c.execute(delete(memories).where(memories.c.user_id == MARK))
         c.execute(delete(cats).where(cats.c.user_id == MARK))
+        c.execute(text("DELETE FROM tasks WHERE user_id = :u"), {"u": MARK})
 
 
 def _fact(cat_id, text_, kind):
@@ -54,6 +55,15 @@ def _fact(cat_id, text_, kind):
         c.execute(insert(memories).values(
             fact_text=text_, key_name=cat_fact_key(cat_id, kind, text_), category="🐾 Коты", related_to="",
             user_id=MARK, review_status="confirmed", cat_id=cat_id))
+
+
+def _care_task(title, label, done_by=None):
+    with get_engine().begin() as c:
+        sid = c.execute(text("SELECT id FROM task_status WHERE code = 'Not started'")).scalar()
+        tid = c.execute(text("INSERT INTO tasks (title, status_id, user_id, for_sitter, care_label) VALUES (:t, :s, :u, true, :l) RETURNING id"),
+                        {"t": title, "s": sid, "u": MARK, "l": label}).scalar()
+        if done_by:
+            c.execute(text("INSERT INTO task_completions (task_id, done_by, source) VALUES (:i, 'x', :s)"), {"i": tid, "s": done_by})
 
 
 @pytest.fixture
@@ -68,6 +78,8 @@ def world():
     with get_engine().begin() as c:                            # факт без привязки к коту — в списке только счётчик
         c.execute(insert(memories).values(fact_text="кошкам нужна свежая вода", key_name="g1", category="🐾 Коты",
                                           user_id=MARK, review_status="confirmed"))
+    _care_task("Поменять лоток (метка)", "лотки", done_by="sitter")           # последнее выполнение — от ситтера
+    _care_task("Поменять воду (метка)", "вода")                              # ещё ни разу не отмечено
     return {"t": t, "p": p}
 
 
@@ -86,8 +98,8 @@ def normalize(payload):
                 m = fact_ids if in_facts else cat_ids
                 base = 100 if in_facts else 0
                 out[k] = m.setdefault(v, base + len(m) + 1)
-            elif k == "created_at":
-                out[k] = "<timestamp>"
+            elif k in ("created_at", "last_done_at"):
+                out[k] = "<timestamp>" if v is not None else None
             else:
                 out[k] = walk(v, in_facts or k == "facts")
         return out
@@ -118,6 +130,8 @@ def test_golden_file_is_fictional_and_sane():
     assert cats_[0]["photo_url"].startswith("https://") and cats_[1]["photo_url"] is None
     assert {gr["type"] for gr in cats_[0]["facts"]} == {"important", "likes", "dislikes", "other"}
     assert g["list_with_facts"]["general_count"] == 1
+    assert g["list_with_facts"]["care"] == [{"label": "лотки", "last_done_at": "<timestamp>", "last_done_by": "sitter"},
+                                            {"label": "вода", "last_done_at": None, "last_done_by": None}]
     assert cats_[0]["facts_count"] == sum(len(gr["items"]) for gr in cats_[0]["facts"]) == 4
     assert g["card"]["facts"] == cats_[0]["facts"]                      # список с фактами и карточка согласованы
 
