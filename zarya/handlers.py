@@ -215,6 +215,9 @@ _TRIP_ERRORS = {
 }
 
 
+_TRIP_HINT = "Про отъезд поняла, а даты нет. Напиши так: «уезжаю с 20 ноября по 5 декабря» 💅"
+
+
 def _is_trip(message: Message, role: str = "guest") -> bool:
     if role != "admin" or not message.from_user:
         return False
@@ -806,6 +809,12 @@ def _bot_addressed(msg: Message) -> bool:
 @router.message(F.text)
 async def on_unrecognized(msg: Message, role: str = "guest") -> None:
     if not _bot_addressed(msg):
+        return
+    text = msg.text or ""
+    # Admin написала про отъезд, но диапазон не разобрался (иначе сообщение ушло бы в on_trip). Быстрая бронь и слоты уже обработаны выше
+    # по порядку регистрации; сюда доходит только то, что осталось, и до платного вызова классификатора даём подсказку формата.
+    if role == "admin" and not text.lstrip().startswith("/") and trip_mod.has_trip_verb(text):
+        await msg.answer(_TRIP_HINT)
         return
     try:
         from zarya.classifier import classify_zarya

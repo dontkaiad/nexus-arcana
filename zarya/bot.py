@@ -51,6 +51,16 @@ def _write_build_stamp() -> None:
         logger.warning("build stamp write failed: %s", e)
 
 
+def build_dispatcher() -> Dispatcher:
+    """Диспетчер Зари с её роутером. Роль выставляется ВНЕШНИМ middleware: обычный (`.middleware`) в aiogram 3 выполняется ПОСЛЕ фильтров,
+    и фильтры с параметром `role` (_is_trip, _is_quick_booking, _is_agenda) всегда видели бы значение по умолчанию «guest» и не срабатывали."""
+    dp = Dispatcher()
+    dp.message.outer_middleware(RoleMiddleware())
+    dp.callback_query.outer_middleware(RoleMiddleware())
+    dp.include_router(router)
+    return dp
+
+
 async def main() -> None:
     _write_build_stamp()
     token = config.booking_bot_token
@@ -58,10 +68,7 @@ async def main() -> None:
         logger.error("BOOKING_BOT_TOKEN not set — Zarya cannot start")
         return
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
-    dp = Dispatcher()
-    dp.message.middleware(RoleMiddleware())
-    dp.callback_query.middleware(RoleMiddleware())
-    dp.include_router(router)
+    dp = build_dispatcher()
     dp.startup.register(_on_startup)
     logger.info("⭐ Zarya starting")
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])

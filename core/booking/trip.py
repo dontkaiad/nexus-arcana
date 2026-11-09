@@ -54,6 +54,11 @@ class TripError(Exception):
         self.code = code
 
 
+def has_trip_verb(text: str) -> bool:
+    """Есть глагол отъезда (уезжаю, улетаю, отъезд…), диапазон дат не обязателен: нужно, чтобы подсказать формат, когда даты не разобрались."""
+    return bool(_TRIGGER_RE.search((text or "").lower()))
+
+
 def is_trip_text(text: str) -> bool:
     """Глагол отъезда И диапазон дат в одной фразе: иначе обычные фразы («уезжаю завтра в 19») идут своими обработчиками."""
     t = (text or "").lower()
