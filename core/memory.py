@@ -222,12 +222,29 @@ def _cat_names_block(cat_names: Optional[List[str]]) -> str:
             "связь = имя кота; про кота без имени — связь «кот».")
 
 
-async def _parse_fact(text: str, cat_names: Optional[List[str]] = None) -> Tuple[str, str, str, str]:
-    """Возвращает (fact, category, связь, ключ). `cat_names` — имена и клички котов владельца (необязательно)."""
+class _Parsed(tuple):
+    """(fact, category, связь, ключ) + необязательный `health` — сырой ключ «здоровье» из ТОГО ЖЕ ответа Haiku (вес / визит / лекарство кота).
+    Это обычный кортеж из четырёх элементов: код, который ждёт кортеж, не меняется."""
+    health: Optional[dict] = None
+
+
+def _with_health(core: tuple, health: Optional[dict]) -> "_Parsed":
+    p = _Parsed(core)
+    p.health = health if isinstance(health, dict) else None
+    return p
+
+
+async def _parse_fact(text: str, cat_names: Optional[List[str]] = None, health=None) -> Tuple[str, str, str, str]:
+    """Возвращает (fact, category, связь, ключ). `cat_names` — имена и клички котов владельца (необязательно).
+    health=<сегодняшняя дата владельца> — к тому же запросу добавлен блок про здоровье кота; результат тогда несёт `.health` (см. _Parsed)."""
     try:
+        extra = ""
+        if health:
+            from core import cat_health_chat
+            extra = cat_health_chat.prompt_block(health)
         raw = await ask_claude(
             text,
-            system=_PARSE_SYSTEM + _cat_names_block(cat_names),
+            system=_PARSE_SYSTEM + _cat_names_block(cat_names) + extra,
             max_tokens=200,
             role="parse",
             temperature=0,
@@ -247,7 +264,7 @@ async def _parse_fact(text: str, cat_names: Optional[List[str]] = None) -> Tuple
                 stem = _normalize_word(связь.lower())
                 if stem and stem not in fact.lower():
                     fact = f"{связь[:1].upper()}{связь[1:]}: {fact}"
-            return fact, category, связь, ключ
+            return _with_health((fact, category, связь, ключ), parsed.get("здоровье") if health else None)
     except Exception as e:
         logger.error("memory _parse_fact error: %s", e)
 
@@ -557,7 +574,18 @@ async def finish_route(user_id: str, ask: dict, choice: dict) -> dict:
         return {**base, "kind": "error", "memory_id": None}
 
 
-async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
+async def _health_today(owner_tg: int):
+    """Сегодняшняя дата в часовом поясе владельца (сбой пояса — UTC+3, как по умолчанию в Nexus)."""
+    from datetime import datetime, timedelta, timezone
+    try:
+        from core.location import get_user_tz
+        tz = int(await get_user_tz(owner_tg))
+    except Exception:
+        tz = 3
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=tz))).date()
+
+
+async def parse_and_store(text: str, user_id: str, bot_label: str, owner_tg: Optional[int] = None) -> dict:
     """Message-free ядро сохранения памяти: раскладка → Haiku-парс →
     диверсия долгов в `debts` → канонизация алиаса → запись.
 
@@ -567,8 +595,21 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
     """
     text = maybe_convert(text.strip())
     cat_names = await asyncio.to_thread(_cat_names, user_id)
-    fact, category, связь, ключ = await _parse_fact(text, cat_names)
+    # Здоровье кота (вес / визит / лекарство): тот же вызов Haiku, блок в промпт только если в тексте есть имя кота и слово про здоровье.
+    want_health = False
+    today = None
+    if owner_tg is not None and cat_names:
+        from core import cat_health_chat
+        want_health = cat_health_chat.wants_health(text, cat_names)
+        if want_health:
+            today = await _health_today(owner_tg)
+    parsed = await _parse_fact(text, cat_names, health=today) if want_health else await _parse_fact(text, cat_names)
+    fact, category, связь, ключ = parsed
     scope = bot_to_scope(bot_label)
+    if want_health and getattr(parsed, "health", None):
+        done = await _store_cat_health(text, user_id, owner_tg, parsed.health, today, fact, category, связь, ключ)
+        if done is not None:
+            return done
 
     if ключ.startswith("долг_"):
         name = (связь or ключ[len("долг_"):]).strip()
@@ -671,6 +712,24 @@ async def parse_and_store(text: str, user_id: str, bot_label: str) -> dict:
             "cat_id": cat["id"] if cat else None, "cat_unknown": cat_unknown}
 
 
+async def _store_cat_health(text: str, user_id: str, owner_tg: int, raw: dict, today, fact: str, category: str, связь: str, ключ: str) -> Optional[dict]:
+    """Ключ «здоровье» → таблицы здоровья + задача-напоминание. None — не вышло или не уверены: сообщение пойдёт обычным фактом, как раньше."""
+    try:
+        from core import cat_health_chat
+        item = cat_health_chat.validate(raw, today, text)
+        if item is None:
+            return None
+        found = await asyncio.to_thread(_resolve_cats, user_id, item.cat_name)
+        if len(found) != 1:
+            return None                                      # нет такого кота или тёзки: без догадок
+        res = await cat_health_chat.store(owner_tg, user_id, found[0], item, today)
+        return {"kind": "cat_health", "fact": fact, "category": category, "key": ключ, "memory_id": None, "was_updated": False,
+                "debt_name": "", "link": связь, "cat_id": found[0]["id"], "cat_unknown": None, "health": res}
+    except Exception:
+        logger.warning("cat health from chat failed, saving as a plain fact", exc_info=True)
+        return None
+
+
 async def save_memory(
     message: Message,
     text: str,
@@ -679,7 +738,7 @@ async def save_memory(
 ) -> None:
     """Распарсить текст через Haiku и сохранить факт в PG (бот-путь)."""
     logger.info("memory save: text=%r bot=%s", text[:60], bot_label)
-    r = await parse_and_store(text, user_id, bot_label)
+    r = await parse_and_store(text, user_id, bot_label, owner_tg=getattr(getattr(message, "from_user", None), "id", None))
     fact, category, ключ = r["fact"], r["category"], r["key"]
     связь = r.get("link", "")
     scope = bot_to_scope(bot_label)
@@ -689,6 +748,9 @@ async def save_memory(
         return
     if r["kind"] == "goal":
         await message.answer(f"🎯 Добавил цель: {fact}")
+        return
+    if r["kind"] == "cat_health":
+        await message.answer(r["health"]["summary_html"])
         return
     if r["kind"] in ("choose_person", "ask_person"):
         from core import memory_route_ui
