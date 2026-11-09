@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
+from core import care
 from core.cats import cat_fact_key, group_facts, safe_photo_url
 from core.cloudinary_client import cloudinary_upload
 from core.people import FACT_TYPES, fact_text
@@ -64,7 +65,8 @@ async def list_cats(with_facts: bool = Query(False, description="добавит�
         for r in rows:
             facts = by_cat.get(r["id"], [])
             out.append({**_cat_out(r, len(facts)), "facts": group_facts(facts, r["name"], r.get("aliases"))})
-    return {"total": len(rows), "cats": out, "general_count": len(general)}
+    care_block = await asyncio.to_thread(care.care_summary, user_id)
+    return {"total": len(rows), "cats": out, "general_count": len(general), "care": care_block}
 
 
 @router.get("/cats/general")

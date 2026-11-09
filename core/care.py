@@ -109,10 +109,45 @@ def is_muted(task: Any, tz_offset: int) -> bool:
 
 
 def set_task_flag(user_id: str, task_id: int, value: bool) -> bool:
+    """Снятие for_sitter очищает и care_label: метка живёт только у задач в расписании ситтера."""
+    vals: Dict[str, Any] = {"for_sitter": bool(value), "updated_at": text("now()")}
+    if not value:
+        vals["care_label"] = None
     with get_engine().begin() as c:
-        r = c.execute(tasks.update().where(tasks.c.id == int(task_id), tasks.c.user_id == user_id)
-                      .values(for_sitter=bool(value), updated_at=text("now()")))
+        r = c.execute(tasks.update().where(tasks.c.id == int(task_id), tasks.c.user_id == user_id).values(**vals))
     return bool(r.rowcount)
+
+
+MAX_CARE_LABEL = 30
+
+
+def set_care_label(user_id: str, task_id: int, label: Optional[str]) -> bool:
+    """Метка для блока «последний раз» («лотки»). Только у СВОЕЙ задачи с for_sitter; None / пусто — снять. ValueError — длиннее 30.
+    False — задачи нет, она чужая или не в расписании ситтера."""
+    clean = _clip(label, 10 ** 6) if label is not None else ""
+    if len(clean) > MAX_CARE_LABEL:
+        raise ValueError("care label too long")
+    with get_engine().begin() as c:
+        r = c.execute(tasks.update().where(tasks.c.id == int(task_id), tasks.c.user_id == user_id, tasks.c.for_sitter.is_(True))
+                      .values(care_label=clean or None, updated_at=text("now()")))
+    return bool(r.rowcount)
+
+
+def care_summary(user_id: str) -> List[Dict[str, Any]]:
+    """Блок «последний раз»: [{label, last_done_at, last_done_by}] по задачам владельца с for_sitter и непустой care_label
+    (не в архиве), по порядку создания. last_done_at — max(task_completions.done_at) в UTC; last_done_by — «sitter», если последнее
+    выполнение пришло от ситтера (source='sitter'), иначе «owner»; нет выполнений — оба null. Без id, названий, заметок и user_id."""
+    if not user_id:
+        return []
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            "SELECT t.care_label AS label, l.done_at, l.source "
+            "FROM tasks t JOIN task_status s ON s.id = t.status_id "
+            "LEFT JOIN LATERAL (SELECT done_at, source FROM task_completions WHERE task_id = t.id ORDER BY done_at DESC, id DESC LIMIT 1) l ON true "
+            "WHERE t.user_id = :u AND t.for_sitter AND t.care_label IS NOT NULL AND btrim(t.care_label) <> '' AND s.code <> 'Archived' "
+            "ORDER BY t.id"), {"u": user_id}).all()
+    return [{"label": _clip(r.label, MAX_CARE_LABEL), "last_done_at": _iso(r.done_at),
+             "last_done_by": None if r.done_at is None else ("sitter" if r.source == "sitter" else "owner")} for r in rows]
 
 
 def _clip(v: Any, n: int) -> str:
