@@ -218,6 +218,15 @@ message before either the regex path or the Haiku fallback responds — Zarya
 never reacts to un-addressed group chatter. Non-owner users cannot add Zarya
 to a group (`on_membership_changed` kicks her back out).
 
+### Lesson: role wiring and how to test the bot (2026-11-09)
+
+- **The role must be set by an OUTER middleware.** In aiogram 3 a plain `dp.message.middleware(...)` runs *after* the filters, so a filter
+  that takes `role` (`_is_trip`, `_is_quick_booking`, `_is_agenda`) always sees the default `"guest"` and never matches. Zarya's wiring
+  is `zarya/bot.py:build_dispatcher()` (`outer_middleware`); `main()` uses it and a test pins that.
+- **Test the bot through a real `Dispatcher`, not by calling handlers directly.** A direct call skips filters, handler order and middleware,
+  which is exactly where this bug lived (the trip phrase never reached `on_trip` in production while every handler unit test was green).
+  Pattern: `tests/test_zarya_trip_hint.py` (`build_dispatcher()` + `Message.answer` intercepted + a call counter on the Haiku classifier).
+
 ## Verify against code
 
 - `core/booking/tables.py` + `alembic/versions/{d4e5f6a7b8c9,f7c8b9a0d1e2,a8b9c0d1e2f3,b1c2d3e4f5a6}` — schema
