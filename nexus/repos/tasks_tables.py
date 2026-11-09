@@ -65,6 +65,8 @@ tasks = Table(
     Column("cat_id", BigInteger, ForeignKey("cats.id", ondelete="SET NULL")),
     # Задача входит в расписание ситтера (GET /api/care/schedule); миграция c1a7e3b9d204.
     Column("for_sitter", Boolean, nullable=False, server_default=text("false")),
+    # Короткая метка для блока «последний раз» (миграция b8d4f2a6c731): только у for_sitter-задач, ≤ 30 символов.
+    Column("care_label", Text),
     Column("user_id", Text, nullable=False, server_default=text("''")),
     Column("created_at", TIMESTAMP(timezone=True), nullable=False,
            server_default=text("now()")),
