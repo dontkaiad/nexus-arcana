@@ -583,6 +583,10 @@ _CANCEL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Слова про здоровье животного: «тучке сделали прививку», «кексу дала капли» — это запись о здоровье кота (memory_save), а не отметка
+# выполненной задачи, поэтому детерминированный префильтр «сделали / сделала … → task_done» их пропускает к модели (у неё есть правило).
+_PET_HEALTH_RE = re.compile(r"прививк|вакцин|глист|дегельмин|блох|клещ|ветеринар|ветклиник|взвеш|взвес|капл|таблетк|антибиот", re.IGNORECASE)
+
 _DONE_RE = re.compile(
     r"\b(сделал[аи]?\b|выполнил[аи]?\b|закончил[аи]?\b|завершил[аи]?\b|"
     r"позвонил[аи]\b|написал[аи]\b|отправил[аи]\b|забрал[аи]\b|"
@@ -1002,7 +1006,7 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
     # есть «закончила/сделала» (баг: «создай задачу пофиксить баг когда не
     # закончила бронирование» → 🔍 Не нашёл задачу).
     if (_done_signal(text) and not _ZAPOMNI_RE.search(text) and not _CURRENCY_RE.search(text)
-            and not _TASK_EXPLICIT_RE.match(text)):
+            and not _TASK_EXPLICIT_RE.match(text) and not _PET_HEALTH_RE.search(text)):
         logger.info("classify: task_done pattern matched")
         return [{"type": "task_done", "task_hint": text}]
 
