@@ -33,7 +33,8 @@ the grams / date / kind / days checked), `false_health` (a message that must sta
 | Offline, 12 cases: outcome accuracy | 50.0% (everything is a fact; 6 health messages missed) | **100%**, false_health 0, missed 0 |
 | Live Haiku, first block (no rule for vague dates): outcome accuracy | n/a | 91.7%: "в начале декабря" became a visit on 2026-12-01 (**false_health 1**) |
 | Live Haiku, final block (weekday + "do not guess vague dates"), 2 runs | n/a | **100% / 100%**, false_health 0, missed 0 |
-| Classifier live, 10 messages (6 cat health, 2 facts, 2 controls): routed as expected | 5 / 10 (cat health reached memory in 1 of 6) | **9 / 10** (5 of 6) |
+| Classifier live, 10 messages (6 cat health, 2 facts, 2 controls): routed as expected | 5 / 10 (cat health reached memory in 1 of 6) | 9 / 10 with the prompt rule (#315), **10 / 10** with the prefilter fix (this revision) |
+| Classifier prefilter, offline, 6 messages (3 pet-health "сделали …", 3 ordinary done messages) | 3 / 6 (pet-health messages stopped at `task_done` before the model) | **6 / 6** |
 | Existing offline evals (`python -m evals offline`): classifier, retrieval recall@5, ambiguity, grounding accept / reject | 100 / 100 / 100 / 100 / 100 | 100 / 100 / 100 / 100 / 100 (unchanged) |
 
 The live run found a real defect that the offline set could not: with only "dates without a year are the nearest future one" the model turns a
@@ -51,8 +52,10 @@ vague phrase into an exact date. The block now says not to guess vague time, and
 
 ## Not covered
 
-- Past tense "Тучке **сделали** прививку 5 ноября" is still routed by the classifier to `task_done` (the "past-tense verb" rule is stronger than the new
-  one); the health path is never reached. 1 of the 10 classifier messages.
+- (Fixed in the revision of 2026-11-10.) "Тучке **сделали** прививку 5 ноября" went to `task_done` NOT because of the model but because the deterministic
+  prefilter `_DONE_RE` ("сделали / сделала …") answers before the model is asked; no prompt rule could have helped. A word about an animal's health
+  (прививк, вакцин, глист, блох, ветеринар, капл, таблетк, …) now skips that prefilter. The price: "сделала прививку" about a person also reaches the model
+  (one LLM call that used to be free), and "сделала таблетки" no longer auto-completes a task.
 - The model, not the code, expands "с 15-го", "в пятницу", "через год"; the code only checks that the date is plausible. A wrong but plausible
   date is recorded (the reply shows it, an edit in the app fixes it). Measured on 12 messages, two runs, one model.
 - Several cats in one sentence, a cat and a person with similar names, two cats with the same name (falls back to a fact, tested but not in the set), a

@@ -67,9 +67,30 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "before_missed": len(health), "wrong": wrong}
 
 
+# Детерминированный префильтр классификатора «сделали / сделала … → task_done»: (текст, должен ли дойти до модели). Слова про здоровье животного
+# его обходят (запись о здоровье кота, а не отметка задачи), обычные «сделала …» по-прежнему не доходят до LLM.
+PREFILTER = [("Тучке сделали прививку 5 ноября", True), ("Пончику сделала прививку от бешенства", True), ("Кексу сделал укол и дал капли", True),
+             ("сделала покупку корма", False), ("выполнила задачу про отчёт", False), ("закончила уборку", False)]
+
+
+def prefilter_check() -> Dict[str, Any]:
+    from unittest.mock import AsyncMock, patch
+    from core import classifier
+    wrong = []
+    for text, reaches in PREFILTER:
+        llm = AsyncMock(return_value='[{"type":"memory_save","text":"x"}]')
+        with patch.object(classifier, "ask_claude", llm), patch.object(classifier, "_known_budget_positions", AsyncMock(return_value=([], []))):
+            asyncio.run(classifier.classify(text, tz_offset=3, user_id=""))
+        if (llm.await_count > 0) != reaches:
+            wrong.append(text)
+    return {"prefilter_cases": len(PREFILTER), "prefilter_acc_pct": pct(len(PREFILTER) - len(wrong), len(PREFILTER)), "prefilter_wrong": wrong}
+
+
 def run_offline() -> Dict[str, Any]:
     cases = load_jsonl(str(SYNTHETIC / "cat_health_cases.jsonl"))
-    return summarize([{"case": c, "got": outcome(c, c.get("model"))} for c in cases])
+    out = summarize([{"case": c, "got": outcome(c, c.get("model"))} for c in cases])
+    out.update(prefilter_check())
+    return out
 
 
 async def _live(cases: List[Dict[str, Any]]) -> Dict[str, Any]:

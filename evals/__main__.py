@@ -21,7 +21,7 @@ def main() -> int:
     ok = (res["classifier"]["accuracy_pct"] == 100.0 and res["memory_retrieval"]["recall_at_5_pct"] == 100.0
           and res["memory_retrieval"]["ambiguity_acc_pct"] in (None, 100.0)
           and res["grounding"]["accept_rate_pct"] == 100.0 and res["grounding"]["reject_recall_pct"] == 100.0
-          and res["cat_health_input"]["outcome_acc_pct"] == 100.0 and not res["cat_health_input"]["false_health"])
+          and res["cat_health_input"]["outcome_acc_pct"] == 100.0 and not res["cat_health_input"]["false_health"] and res["cat_health_input"]["prefilter_acc_pct"] == 100.0)
     return 0 if ok else 1
 
 
