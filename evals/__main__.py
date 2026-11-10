@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 import sys
 
-from evals import classifier_eval, grounding_eval, memory_eval
+from evals import cat_health_eval, classifier_eval, grounding_eval, memory_eval
 
 
 def run_all():
     return {"classifier": classifier_eval.run_offline(), "memory_retrieval": memory_eval.run_offline(),
-            "grounding": grounding_eval.run_offline()}
+            "grounding": grounding_eval.run_offline(), "cat_health_input": cat_health_eval.run_offline()}
 
 
 def main() -> int:
@@ -20,7 +20,8 @@ def main() -> int:
     print(json.dumps(res, ensure_ascii=False, indent=2))
     ok = (res["classifier"]["accuracy_pct"] == 100.0 and res["memory_retrieval"]["recall_at_5_pct"] == 100.0
           and res["memory_retrieval"]["ambiguity_acc_pct"] in (None, 100.0)
-          and res["grounding"]["accept_rate_pct"] == 100.0 and res["grounding"]["reject_recall_pct"] == 100.0)
+          and res["grounding"]["accept_rate_pct"] == 100.0 and res["grounding"]["reject_recall_pct"] == 100.0
+          and res["cat_health_input"]["outcome_acc_pct"] == 100.0 and not res["cat_health_input"]["false_health"])
     return 0 if ok else 1
 
 

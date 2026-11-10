@@ -318,4 +318,4 @@ async def test_miniapp_fab_returns_the_health_result(cat):
 
 def test_classifier_routes_cat_health_to_memory_not_to_tasks():
     src = open("core/classifier.py", encoding="utf-8").read()
-    assert "ПРАВИЛО здоровье кота" in src and "memory_save, НЕ task" in src
+    assert "ПРАВИЛО здоровье кота" in src and "memory_save, НЕ task и НЕ task_done" in src
