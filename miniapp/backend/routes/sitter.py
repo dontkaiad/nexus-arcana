@@ -4,6 +4,8 @@
                                     чеклисты (`lists`) + видимый инвентарь по категориям (`inventory`); условие видимости одно
                                     (repo.sitter_visible_clause), без id, цен и остальных данных Nexus (память, прочие списки).
 • POST /api/sitter/ask            — поиск ситтера без LLM по тем же источникам (+ факты про котов), тем же читающим токеном.
+• GET  /api/sitter/cat-care       — паспорта котов для ситтера (тот же читающий токен): карточки с фактами, действующие лекарства без скрытых,
+                                    вес и визиты только открытые флагом; минимальный набор полей (core/sitter_cat_care.py).
 • GET  /api/lists/sitter-preview  — владелец видит ровно то же, что ситтер, + id для переключателей.
 • POST /api/lists/{id}/sitter     — владелец ставит / снимает пометку «для ситтера» (покупки, чеклист).
 • POST /api/lists/{id}/sitter-hidden — владелец скрывает / открывает пункт инвентаря.
@@ -17,7 +19,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from core import sitter_search
+from core import sitter_cat_care, sitter_search
 from core.repos import pg_sitter_lists_repo as repo
 from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
@@ -32,6 +34,15 @@ router = APIRouter()
 async def sitter_lists(owner_tg_id: int = Depends(sitter_lists_gate)) -> Dict[str, Any]:
     user_id = (await get_user_id(owner_tg_id)) or ""
     return await asyncio.to_thread(_payload, user_id, False)
+
+
+@router.get("/sitter/cat-care")
+async def sitter_cat_care_route(owner_tg_id: int = Depends(sitter_lists_gate)) -> Dict[str, Any]:
+    """Паспорта котов для ситтера. Окно доступа (даты stay) проверяет приложение cats; здесь только узкое чтение под читающим токеном."""
+    user_id = (await get_user_id(owner_tg_id)) or ""
+    if not user_id:
+        raise HTTPException(status_code=404, detail="not found")
+    return await sitter_cat_care.build(user_id, owner_tg_id)
 
 
 def _payload(user_id: str, with_ids: bool) -> Dict[str, Any]:

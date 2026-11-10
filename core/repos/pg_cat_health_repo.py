@@ -264,3 +264,33 @@ def upcoming(user_id: str, today: date, horizon_days: int = 60) -> List[Dict[str
             out.append({"type": "med_end", "ref_id": r.id, "cat_id": r.cat_id, "kind": "med", "title": r.name, "date": r.d, "overdue": False})
     out.sort(key=lambda e: (e["date"], e["cat_id"], e["ref_id"]))
     return out
+
+
+# ── для ситтера (читающий токен): только то, что владелец открыл, минимальный набор полей ────────────────────────────────
+
+SITTER_WEIGHTS_PER_CAT = 12
+SITTER_VISITS_BACK_DAYS = 60
+SITTER_VISITS_LIMIT = 50
+
+
+def sitter_weights(user_id: str, per_cat: int = SITTER_WEIGHTS_PER_CAT) -> List[Dict[str, Any]]:
+    """Взвешивания, которые владелец открыл ситтеру (sitter_visible): последние per_cat на кота. Только кот, дата, граммы: без заметок и id."""
+    with get_engine().connect() as c:
+        return [_row(r) for r in c.execute(text(
+            "SELECT cat_id, weighed_on, grams FROM ("
+            " SELECT w.cat_id, w.weighed_on, w.grams, row_number() OVER (PARTITION BY w.cat_id ORDER BY w.weighed_on DESC) AS rn"
+            " FROM cat_weights w JOIN cats ct ON ct.id = w.cat_id AND ct.user_id = w.user_id AND ct.status = 'confirmed'"
+            " WHERE w.user_id = :u AND w.sitter_visible) t WHERE rn <= :n ORDER BY cat_id, weighed_on DESC"),
+            {"u": user_id, "n": max(1, min(int(per_cat), 100))})]
+
+
+def sitter_visits(user_id: str, today: date, back_days: int = SITTER_VISITS_BACK_DAYS, limit: int = SITTER_VISITS_LIMIT) -> List[Dict[str, Any]]:
+    """Визиты, которые владелец открыл ситтеру: запланированные и состоявшиеся за последние back_days. Только кот, вид, название, дата, статус:
+    без клиники, заметок, следующего срока и связи с задачей."""
+    since = today - timedelta(days=max(1, min(int(back_days), 365)))
+    with get_engine().connect() as c:
+        return [_row(r) for r in c.execute(text(
+            "SELECT v.cat_id, v.kind, v.title, v.visit_on, v.status FROM cat_vet_visits v "
+            "JOIN cats ct ON ct.id = v.cat_id AND ct.user_id = v.user_id AND ct.status = 'confirmed' "
+            "WHERE v.user_id = :u AND v.sitter_visible AND v.status IN ('planned', 'done') AND v.visit_on >= :since "
+            "ORDER BY v.visit_on, v.id LIMIT :l"), {"u": user_id, "since": since, "l": max(1, min(int(limit), 200))})]

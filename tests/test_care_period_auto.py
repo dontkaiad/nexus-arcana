@@ -231,7 +231,7 @@ def test_every_token_opens_exactly_its_own_routes_and_the_sets_are_disjoint():
     period_set, write_set, read_set, cats_set = _opened_by(P), _opened_by(W), _opened_by(R), _opened_by(C)
     assert period_set == {("PUT", "/api/care/period/auto")}
     assert write_set == {("POST", "/api/care/tasks/{task_id}/done"), ("POST", "/api/care/tasks/{task_id}/postpone")}
-    assert read_set == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask")}
+    assert read_set == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask"), ("GET", "/api/sitter/cat-care")}
     assert all(p.startswith("/api/cats") for _, p in cats_set)                       # токен котов: только карточки котов (его маршруты зависят от адреса клиента)
     sets = [period_set, write_set, read_set, cats_set]
     for i, a in enumerate(sets):
