@@ -404,3 +404,61 @@ def test_a_one_day_course_whose_only_reminder_would_fall_after_its_end_gets_no_t
     with patch("core.cat_health.med_reminder", return_value=f"{D(2).isoformat()}T09:00"):
         m = client.post(f"/api/cat-health/cats/{cat}/meds", json={"name": "укол", "days": 1}, headers=H).json()["med"]
     assert m["task_id"] is None and m["task_linked"] is False and n_tasks() == 0
+
+
+# ── «сегодня» по часовому поясу владельца: готовая дата и число дней приходят от Nexus ──────────────────────────────────
+
+REAL_TODAY_TZ = svc._today_tz                      # до подмены в фикстуре: настоящий расчёт даты владельца
+
+
+def _upcoming_at(client, now_utc: str, tz: int):
+    from freezegun import freeze_time
+    with freeze_time(now_utc), patch("core.cat_health._today_tz", REAL_TODAY_TZ), patch("miniapp.backend._helpers.get_user_tz", AsyncMock(return_value=tz)):
+        return client.get("/api/cat-health/upcoming?days=30", headers=H).json()
+
+
+def _days(body):
+    return {e["title"]: (e["date"], e["days_until"], e["overdue"]) for e in body["events"]}
+
+
+def test_upcoming_day_boundary_follows_the_owner_time_zone_not_utc(client, cat):
+    for title, d in (("вчера", "2026-12-01"), ("сегодня", "2026-12-02"), ("завтра", "2026-12-03")):
+        repo.add_visit(MARK, cat, title, date.fromisoformat(d))
+    # 20:30 UTC = 23:30 в UTC+3: ещё 1 декабря
+    b = _upcoming_at(client, "2026-12-01 20:30:00", 3)
+    assert b["today"] == "2026-12-01"
+    assert _days(b) == {"вчера": ("2026-12-01", 0, False), "сегодня": ("2026-12-02", 1, False), "завтра": ("2026-12-03", 2, False)}
+    # 21:30 UTC = 00:30 в UTC+3: уже 2 декабря, вчерашний визит просрочен
+    b = _upcoming_at(client, "2026-12-01 21:30:00", 3)
+    assert b["today"] == "2026-12-02"
+    assert _days(b) == {"вчера": ("2026-12-01", -1, True), "сегодня": ("2026-12-02", 0, False), "завтра": ("2026-12-03", 1, False)}
+
+
+def test_upcoming_boundary_for_a_zone_behind_utc(client, cat):
+    repo.add_visit(MARK, cat, "первое", date(2026, 12, 1))
+    # 03:30 UTC 2 декабря = 22:30 1 декабря в UTC-5
+    b = _upcoming_at(client, "2026-12-02 03:30:00", -5)
+    assert b["today"] == "2026-12-01" and _days(b)["первое"] == ("2026-12-01", 0, False)
+    b = _upcoming_at(client, "2026-12-02 05:30:00", -5)                           # 00:30 2 декабря по местному
+    assert b["today"] == "2026-12-02" and _days(b)["первое"] == ("2026-12-01", -1, True)
+
+
+def test_overdue_flag_and_days_until_never_disagree_and_are_plain_values(client, cat):
+    for i, d in enumerate(("2026-11-20", "2026-12-02", "2026-12-20")):
+        repo.add_visit(MARK, cat, f"v{i}", date.fromisoformat(d))
+    b = _upcoming_at(client, "2026-12-02 09:00:00", 3)
+    assert b["events"] and all(isinstance(e["days_until"], int) and isinstance(e["date"], str) and e["overdue"] == (e["days_until"] < 0) for e in b["events"])
+    assert [e["date"] for e in b["events"]] == sorted(e["date"] for e in b["events"])
+
+
+def test_course_days_left_counts_to_the_last_day_in_the_owner_zone(client, cat):
+    repo.add_med(MARK, cat, "капли", date(2026, 11, 28), days=5)                  # 28.11 .. 02.12
+    repo.add_med(MARK, cat, "постоянные", date(2026, 11, 1))
+    b = _upcoming_at(client, "2026-12-01 20:30:00", 3)                            # локально 1 декабря 23:30
+    left = {m["name"]: m["days_left"] for m in b["current_meds"]}
+    assert left == {"капли": 1, "постоянные": None}
+    b = _upcoming_at(client, "2026-12-01 21:30:00", 3)                            # локально 2 декабря 00:30: последний день курса
+    assert {m["name"]: m["days_left"] for m in b["current_meds"]}["капли"] == 0
+    b = _upcoming_at(client, "2026-12-02 21:30:00", 3)                            # локально 3 декабря: курс закончился и закрыт
+    assert [m["name"] for m in b["current_meds"]] == ["постоянные"]
+    assert repo.list_meds(MARK, cat, "done")[0]["name"] == "капли"

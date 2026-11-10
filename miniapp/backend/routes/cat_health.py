@@ -226,10 +226,16 @@ async def delete_med(med_id: int, owner_tg: int = Depends(cats_write_gate)) -> D
 
 @router.get("/upcoming")
 async def upcoming(days: int = Query(60, ge=1, le=365), owner_tg: int = Depends(cats_write_gate)) -> Dict[str, Any]:
-    """Ближайшие события по всем котам (запланированные и просроченные визиты, срок следующей прививки, конец курса) и действующие курсы."""
+    """Ближайшие события по всем котам (запланированные и просроченные визиты, срок следующей прививки, конец курса) и действующие курсы.
+
+    Часовой пояс владельца учитывает ТОЛЬКО Nexus: «сегодня» считается здесь, каждое событие приходит с готовой датой `date` (ГГГГ-ММ-ДД) и числом дней
+    до неё `days_until` (0 — сегодня, меньше нуля — просрочено), у курса `days_left` (0 — последний день сегодня, None — без конца). Потребитель
+    (приложение cats) ничего не пересчитывает и не сравнивает со своей датой."""
     await svc.finish_expired(owner_tg)
     user_id = await _uid(owner_tg)
     today, _tz = await svc._today_tz(owner_tg)
     events = await asyncio.to_thread(repo.upcoming, user_id, today, days)
     meds = await asyncio.to_thread(repo.current_meds, user_id, today)
-    return {"today": today.isoformat(), "events": [_out(e) for e in events], "current_meds": [_out(m) for m in meds]}
+    out_events = [{**_out(e), "days_until": (e["date"] - today).days} for e in events]
+    out_meds = [{**_out(m), "days_left": (m["ends_on"] - today).days if m["ends_on"] else None} for m in meds]
+    return {"today": today.isoformat(), "events": out_events, "current_meds": out_meds}
