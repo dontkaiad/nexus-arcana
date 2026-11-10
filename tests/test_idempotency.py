@@ -269,7 +269,7 @@ def test_memory_create_same_key_creates_one(client):
     from contextlib import ExitStack
     n = {"c": 0}
 
-    async def fake_parse(text, user_id, bot_label="☀️ Nexus"):
+    async def fake_parse(text, user_id, bot_label="☀️ Nexus", owner_tg=None):
         n["c"] += 1
         return {"kind": "memory", "memory_id": f"mem-{n['c']}", "fact": text}
 

@@ -68,6 +68,18 @@ python -m evals.classifier_eval run --cases evals/synthetic/classifier_ab_cases.
 Real messages: set `EVAL_CAPTURE=1` on the server to append incoming message texts (no user id) to
 `data/evals/captured_messages.jsonl`, then `python -m evals.classifier_eval collect --captured … --limit 100`.
 
+## 1b. Cat health input eval — `evals/cat_health_eval.py`
+
+**What it checks.** Whether a message about a cat's weight, vet visit or medicine course ends up in the health tables (and nothing else does): gate
+(name + health word, no LLM), strict validation of the model's optional `"здоровье"` object, cat resolution. Outcome accuracy, `false_health`
+(a record that must not exist) and `missed`. `offline` uses hand-written model answers (in `python -m evals offline`); `live` calls the real Haiku with
+the real prompt. See [Case 0036](CASES/0036-cat-health-input.md).
+
+```bash
+python -m evals.cat_health_eval offline
+ANTHROPIC_API_KEY=… python -m evals.cat_health_eval live      # fictional text only, cents
+```
+
 ## 2. Retrieval eval — `evals/memory_eval.py`
 
 **What it checks.** Whether the right facts are among the top five for a question, and whether the question was routed

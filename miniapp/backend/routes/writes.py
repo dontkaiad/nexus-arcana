@@ -1780,9 +1780,12 @@ async def memory_create(
 async def _memory_create(body: "NoteBody", tg_id: int) -> dict[str, Any]:
     user_id = (await get_user_id(tg_id)) or ""
     from core.memory import parse_and_store
-    r = await parse_and_store(body.text, user_id, bot_label="☀️ Nexus")
+    r = await parse_and_store(body.text, user_id, bot_label="☀️ Nexus", owner_tg=tg_id)
     if r["kind"] == "error":
         raise HTTPException(status_code=500, detail="failed to create memory")
+    if r["kind"] == "cat_health":                             # вес / визит / лекарство кота: записано в таблицы здоровья (+ задача-напоминание)
+        await notify_user(tg_id, r["health"]["summary_html"], bot="nexus")
+        return {"ok": True, "id": None, "kind": "cat_health", "health": {k: v for k, v in r["health"].items() if k != "summary_html"}}
     if r["kind"] == "debt":
         await notify_user(tg_id, f"📋 Записала долг: <b>{_esc(r['fact'])}</b>", bot="nexus")
         return {"ok": True, "id": None, "kind": "debt"}
