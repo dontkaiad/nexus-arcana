@@ -163,6 +163,10 @@ class AppConfig:
     care_write_token: str = ""
     care_write_owner_tg_id: int = 0
     care_period_token: str = ""            # ОТДЕЛЬНЫЙ токен cats → Nexus: только PUT /api/care/period/auto
+    # Здоровье котов (вес, визиты / прививки, курсы лекарств) для приложения cats от имени владельца: ОТДЕЛЬНЫЙ токен,
+    # открывает только маршруты /api/cat-health/*. Приложение само проверяет владельца по своему initData, токен в браузер не попадает.
+    cats_write_token: str = ""
+    cats_write_owner_tg_id: int = 0
     care_period_owner_tg_id: int = 0
     # Свободный текст о Кай для Zarya-промпта (#228). НИКОГДА не хардкодить
     # реальные факты в коде — репо публичный. Живёт только в .env на сервере,
@@ -195,6 +199,8 @@ def load_config() -> AppConfig:
         care_write_token     = _optional("CARE_WRITE_TOKEN").strip(),
         care_write_owner_tg_id = _int_or_zero(_optional("CARE_WRITE_OWNER_TG_ID")),
         care_period_token    = _optional("CARE_PERIOD_TOKEN").strip(),
+        cats_write_token     = _optional("CATS_WRITE_TOKEN").strip(),
+        cats_write_owner_tg_id = _int_or_zero(_optional("CATS_WRITE_OWNER_TG_ID")),
         care_period_owner_tg_id = _int_or_zero(_optional("CARE_PERIOD_OWNER_TG_ID")),
         booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
         booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
