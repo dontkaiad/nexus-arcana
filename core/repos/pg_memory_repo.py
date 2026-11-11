@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select, text, or_, and_, exists
+from sqlalchemy import select, text, or_, and_, exists, func
 from sqlalchemy.engine import Engine
 
 from core.repos.memories_table import memories
@@ -110,6 +110,7 @@ def _add_sync(
     source_quote: Optional[str] = None,
     provenance: Optional[dict] = None,
     cat_id: Optional[int] = None,
+    cat_block: Optional[str] = None,
 ) -> str:
     with get_engine().begin() as conn:
         result = conn.execute(
@@ -118,6 +119,7 @@ def _add_sync(
                 source_quote=source_quote,
                 person_id=person_id,
                 cat_id=cat_id,
+                cat_block=cat_block,
                 review_status=review_status or "confirmed",
                 fact_text=fact,
                 key_name=key or "",
@@ -146,6 +148,7 @@ def _upsert_sync(
     source_quote: Optional[str] = None,
     provenance: Optional[dict] = None,
     cat_id: Optional[int] = None,
+    cat_block: Optional[str] = None,
 ) -> Tuple[str, bool]:
     """Find existing by key (+ owner), update; else create. Returns (id, was_updated).
 
@@ -178,6 +181,9 @@ def _upsert_sync(
             extra = {"person_id": person_id} if person_id is not None else {}
             if cat_id is not None:
                 extra["cat_id"] = cat_id
+            if cat_block is not None:
+                # Повтор того же факта не перетирает блок, который уже поставлен (в том числе владельцем): ставим только поверх NULL / unsorted.
+                extra["cat_block"] = func.coalesce(func.nullif(memories.c.cat_block, "unsorted"), cat_block)
             if source_quote is not None:
                 extra["source_quote"] = source_quote
             extra.update(provenance or {})
@@ -215,7 +221,7 @@ def _upsert_sync(
                 logger.warning("memory upsert: embedding NULL-reset failed for %s: %s", mem_id, e)
             return str(mem_id), True
     mem_id = _add_sync(fact, key, category, scope, related_to, source, user_id,
-                       person_id, review_status, source_quote, provenance, cat_id)
+                       person_id, review_status, source_quote, provenance, cat_id, cat_block)
     return mem_id, False
 
 
@@ -549,10 +555,11 @@ class PgMemoryRepo:
         source_quote: Optional[str] = None,
         provenance: Optional[dict] = None,
         cat_id: Optional[int] = None,
+        cat_block: Optional[str] = None,
     ) -> str:
         mem_id = await asyncio.to_thread(
             _add_sync, fact, key, category, scope, related_to, source, user_id,
-            person_id, review_status, source_quote, provenance, cat_id,
+            person_id, review_status, source_quote, provenance, cat_id, cat_block,
         )
         if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category, person_id)
@@ -573,12 +580,13 @@ class PgMemoryRepo:
         source_quote: Optional[str] = None,
         provenance: Optional[dict] = None,
         cat_id: Optional[int] = None,
+        cat_block: Optional[str] = None,
     ) -> Tuple[str, bool]:
         """index=False — не спавнить эмбеддинг (массовый импорт индексирует
         пачками через index_memories_batch)."""
         mem_id, was_updated = await asyncio.to_thread(
             _upsert_sync, fact, key, category, scope, related_to, source, user_id,
-            person_id, review_status, source_quote, provenance, cat_id,
+            person_id, review_status, source_quote, provenance, cat_id, cat_block,
         )
         if mem_id and index:
             _spawn_index(mem_id, fact, related_to, category, person_id)

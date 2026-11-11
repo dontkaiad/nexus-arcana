@@ -226,26 +226,32 @@ class _Parsed(tuple):
     """(fact, category, связь, ключ) + необязательный `health` — сырой ключ «здоровье» из ТОГО ЖЕ ответа Haiku (вес / визит / лекарство кота).
     Это обычный кортеж из четырёх элементов: код, который ждёт кортеж, не меняется."""
     health: Optional[dict] = None
+    block: Optional[str] = None       # сырой ключ «блок» (core.cat_blocks) из ТОГО ЖЕ ответа Haiku; нормализует вызывающий
 
 
-def _with_health(core: tuple, health: Optional[dict]) -> "_Parsed":
+def _with_health(core: tuple, health: Optional[dict], block: Optional[str] = None) -> "_Parsed":
     p = _Parsed(core)
     p.health = health if isinstance(health, dict) else None
+    p.block = block if isinstance(block, str) else None
     return p
 
 
-async def _parse_fact(text: str, cat_names: Optional[List[str]] = None, health=None) -> Tuple[str, str, str, str]:
+async def _parse_fact(text: str, cat_names: Optional[List[str]] = None, health=None, block: bool = False) -> Tuple[str, str, str, str]:
     """Возвращает (fact, category, связь, ключ). `cat_names` — имена и клички котов владельца (необязательно).
-    health=<сегодняшняя дата владельца> — к тому же запросу добавлен блок про здоровье кота; результат тогда несёт `.health` (см. _Parsed)."""
+    health=<сегодняшняя дата владельца> — к тому же запросу добавлен блок про здоровье кота; результат тогда несёт `.health` (см. _Parsed).
+    block=True — к тому же запросу добавлено описание блоков факта про кота (core.cat_blocks); результат несёт `.block`."""
     try:
         extra = ""
         if health:
             from core import cat_health_chat
             extra = cat_health_chat.prompt_block(health)
+        if block:
+            from core import cat_blocks
+            extra += cat_blocks.prompt_block()
         raw = await ask_claude(
             text,
             system=_PARSE_SYSTEM + _cat_names_block(cat_names) + extra,
-            max_tokens=200,
+            max_tokens=240 if block else 200,
             role="parse",
             temperature=0,
         )
@@ -264,7 +270,8 @@ async def _parse_fact(text: str, cat_names: Optional[List[str]] = None, health=N
                 stem = _normalize_word(связь.lower())
                 if stem and stem not in fact.lower():
                     fact = f"{связь[:1].upper()}{связь[1:]}: {fact}"
-            return _with_health((fact, category, связь, ключ), parsed.get("здоровье") if health else None)
+            return _with_health((fact, category, связь, ключ), parsed.get("здоровье") if health else None,
+                                parsed.get("блок") if block else None)
     except Exception as e:
         logger.error("memory _parse_fact error: %s", e)
 
@@ -603,7 +610,12 @@ async def parse_and_store(text: str, user_id: str, bot_label: str, owner_tg: Opt
         want_health = cat_health_chat.wants_health(text, cat_names)
         if want_health:
             today = await _health_today(owner_tg)
-    parsed = await _parse_fact(text, cat_names, health=today) if want_health else await _parse_fact(text, cat_names)
+    from core import cat_blocks
+    want_block = cat_blocks.wants_block(text, cat_names)
+    kw = {"health": today} if want_health else {}
+    if want_block:
+        kw["block"] = True
+    parsed = await _parse_fact(text, cat_names, **kw) if kw else await _parse_fact(text, cat_names)
     fact, category, связь, ключ = parsed
     scope = bot_to_scope(bot_label)
     if want_health and getattr(parsed, "health", None):
@@ -682,6 +694,8 @@ async def parse_and_store(text: str, user_id: str, bot_label: str, owner_tg: Opt
                 and связь.lower() not in _GENERIC_CAT_WORDS:
             cat_unknown = связь
 
+    # Блок факта про кота: только для «🐾 Коты» без карточки человека; нет ответа модели / сомнение → unsorted (закрыто), не NULL.
+    cat_block = cat_blocks.normalize(getattr(parsed, "block", None)) if category == CATS_CATEGORY and not person else None
     try:
         was_updated = False
         if person:
@@ -696,11 +710,11 @@ async def parse_and_store(text: str, user_id: str, bot_label: str, owner_tg: Opt
             from core.people import guess_fact_type
             ключ = cat_fact_key(cat["id"], guess_fact_type(fact), fact)
             mid, was_updated = await _mem_repo.upsert(
-                fact, ключ, category, scope, cat["name"], "manual", user_id, cat_id=cat["id"]
+                fact, ключ, category, scope, cat["name"], "manual", user_id, cat_id=cat["id"], cat_block=cat_block
             )
         else:
             mid = await _mem_repo.add(
-                fact, ключ, category, scope, связь, "manual", user_id
+                fact, ключ, category, scope, связь, "manual", user_id, cat_block=cat_block
             )
     except Exception as e:
         logger.error("parse_and_store: write error %s", e)

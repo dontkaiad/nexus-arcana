@@ -9,10 +9,10 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from core import care
+from core import care, cat_blocks
 from core.cats import cat_fact_key, group_facts, safe_photo_url
 from core.cloudinary_client import cloudinary_upload
 from core.people import FACT_TYPES, fact_text
@@ -49,8 +49,13 @@ def _cat_out(c: Dict[str, Any], facts_count: int = 0) -> Dict[str, Any]:
     }
 
 
+def _owner_session(request: Request) -> bool:
+    """Блок факта отдаём только при входе владельца (initData / cookie). Чтение по Bearer-токену (приложение cats) его не получает: контракт cats_read_v1 не меняется."""
+    return getattr(request.state, "cats_read_owner", None) is None
+
+
 @router.get("/cats", dependencies=[Depends(cats_read_gate)])
-async def list_cats(with_facts: bool = Query(False, description="добавить факты по типам каждому коту (один запрос)"),
+async def list_cats(request: Request, with_facts: bool = Query(False, description="добавить факты по типам каждому коту (один запрос)"),
                     tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
     rows: List[Dict[str, Any]] = await asyncio.to_thread(repo.list_cats, user_id)
@@ -64,7 +69,7 @@ async def list_cats(with_facts: bool = Query(False, description="добавит�
         out = []
         for r in rows:
             facts = by_cat.get(r["id"], [])
-            out.append({**_cat_out(r, len(facts)), "facts": group_facts(facts, r["name"], r.get("aliases"))})
+            out.append({**_cat_out(r, len(facts)), "facts": group_facts(facts, r["name"], r.get("aliases"), with_block=_owner_session(request))})
     care_block = await asyncio.to_thread(care.care_summary, user_id)
     return {"total": len(rows), "cats": out, "general_count": len(general), "care": care_block}
 
@@ -74,17 +79,17 @@ async def general_facts(tg_id: int = Depends(current_user_id)) -> Dict[str, Any]
     """«Общее про котов». Объявлен ДО /cats/{cat_id}, иначе «general» уйдёт в int-параметр."""
     user_id = await _owner(tg_id)
     facts = await asyncio.to_thread(repo.list_general_facts, user_id)
-    return {"total": len(facts), "facts": group_facts(facts, strip_name=False)}
+    return {"total": len(facts), "facts": group_facts(facts, strip_name=False, with_block=True)}
 
 
 @router.get("/cats/{cat_id}", dependencies=[Depends(cats_read_gate)])
-async def cat_card(cat_id: int, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+async def cat_card(cat_id: int, request: Request, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
     user_id = await _owner(tg_id)
     c = await asyncio.to_thread(repo.get_cat, user_id, cat_id)
     if not c or c["status"] == "rejected":
         raise HTTPException(status_code=404, detail="cat not found")
     facts = await asyncio.to_thread(repo.list_facts, user_id, cat_id)
-    return {**_cat_out(c, len(facts)), "facts": group_facts(facts, c["name"], c.get("aliases"))}
+    return {**_cat_out(c, len(facts)), "facts": group_facts(facts, c["name"], c.get("aliases"), with_block=_owner_session(request))}
 
 
 # ── запись ───────────────────────────────────────────────────────────────────
@@ -191,6 +196,23 @@ async def upload_cat_photo(cat_id: int, file: UploadFile = File(...),
 class CatFactBody(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     type: str = "other"
+    block: Optional[str] = None                              # core.cat_blocks.BLOCKS; не задан → unsorted (закрыто)
+
+
+class FactBlockBody(BaseModel):
+    block: str
+
+
+@router.patch("/cats/facts/{memory_id}/block")
+async def set_fact_block(memory_id: int, body: FactBlockBody, tg_id: int = Depends(current_user_id)) -> Dict[str, Any]:
+    """Поставить блок факту про котов (profile|care|health|relations|owner|unsorted): быстрая разметка «Неразобранного» владельцем.
+    Не свой / не факт про котов / факт карточки человека / стёртый — 404; неизвестный блок — 422 (молча в unsorted не превращаем)."""
+    user_id = await _owner(tg_id)
+    if body.block not in cat_blocks.BLOCKS:
+        raise HTTPException(status_code=422, detail="bad block")
+    if not await asyncio.to_thread(repo.set_fact_block, user_id, memory_id, body.block):
+        raise HTTPException(status_code=404, detail="fact not found")
+    return {"ok": True, "fact_id": memory_id, "block": body.block}
 
 
 @router.post("/cats/{cat_id}/facts")
@@ -204,7 +226,7 @@ async def add_cat_fact(cat_id: int, body: CatFactBody, tg_id: int = Depends(curr
     text_ = fact_text(c["name"], text_)                      # «Имя: …» ради контекста бота; в карточке префикс срезается
     mid, was_updated = await PgMemoryRepo().upsert(
         text_, cat_fact_key(cat_id, body.type, text_), repo.CATS_CATEGORY, bot_to_scope("☀️ Nexus"),
-        c["name"], "manual", user_id, cat_id=cat_id, review_status="confirmed",
+        c["name"], "manual", user_id, cat_id=cat_id, review_status="confirmed", cat_block=cat_blocks.normalize(body.block),
     )
     n = (await asyncio.to_thread(repo.facts_count, user_id, [cat_id])).get(cat_id, 0)
     return {"ok": True, "fact_id": int(mid), "was_updated": bool(was_updated), "facts_count": n}

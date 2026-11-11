@@ -80,6 +80,17 @@ python -m evals.cat_health_eval offline
 ANTHROPIC_API_KEY=… python -m evals.cat_health_eval live      # fictional text only, cents
 ```
 
+
+## 1c. Cat fact block eval — `evals/cat_block_eval.py`
+
+Block of a cat fact (profile | care | health | relations | owner | unsorted) and who may see it. Key metric: `false_open` (a closed fact became visible to the sitter) must be 0.
+`offline` is part of `python -m evals offline`; `live` sends fictional text to the real Haiku. See [Case 0037](CASES/0037-cat-fact-blocks.md).
+
+```bash
+python -m evals.cat_block_eval offline
+ANTHROPIC_API_KEY=… python -m evals.cat_block_eval live      # fictional text only, cents
+```
+
 ## 2. Retrieval eval — `evals/memory_eval.py`
 
 **What it checks.** Whether the right facts are among the top five for a question, and whether the question was routed
