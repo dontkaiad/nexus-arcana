@@ -1701,6 +1701,18 @@ async def main() -> None:
             id="budget_payday_review",
             replace_existing=True,
         )
+        # 🎂 Дни рождения: задача «Поздравить» + пуш день в день — 07:00 UTC (10:00 МСК), только на BIRTHDAY_PUSH_TG_ID
+        from core.birthdays import send_birthday_pushes
+        nexus_scheduler.add_job(
+            send_birthday_pushes,
+            args=[bot],
+            trigger=CronTrigger(hour=7, minute=0),
+            id="birthday_pushes",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=6 * 3600,
+        )
         # 🔎 Трассы поиска по памяти: удалить старше 30 дней — ежедневно 03:30 UTC
         from core.memory_trace import purge_old_traces
         nexus_scheduler.add_job(

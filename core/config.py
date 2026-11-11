@@ -168,6 +168,8 @@ class AppConfig:
     cats_write_token: str = ""
     cats_write_owner_tg_id: int = 0
     care_period_owner_tg_id: int = 0
+    # Пуши «у кого сегодня ДР» (core.birthdays): ОДИН получатель — личный tg_id Кай, без fan-out. Пусто → пуши выключены.
+    birthday_push_tg_id: int = 0
     # Свободный текст о Кай для Zarya-промпта (#228). НИКОГДА не хардкодить
     # реальные факты в коде — репо публичный. Живёт только в .env на сервере,
     # правится напрямую там; пусто → Заря просто без доп. контекста о Кай.
@@ -202,6 +204,7 @@ def load_config() -> AppConfig:
         cats_write_token     = _optional("CATS_WRITE_TOKEN").strip(),
         cats_write_owner_tg_id = _int_or_zero(_optional("CATS_WRITE_OWNER_TG_ID")),
         care_period_owner_tg_id = _int_or_zero(_optional("CARE_PERIOD_OWNER_TG_ID")),
+        birthday_push_tg_id  = _int_or_zero(_optional("BIRTHDAY_PUSH_TG_ID")),
         booking_bot_token    = _optional("BOOKING_BOT_TOKEN"),
         booking_api_base     = _optional("BOOKING_API_BASE", "http://nexus-bot:8000"),
         zarya_kai_context    = _optional("ZARYA_KAI_CONTEXT"),
