@@ -9,6 +9,7 @@ Lists vN.x, Memory vN.x).
 ## [Unreleased]
 
 ### Added
+- 🐾 Коты: владелец размечает «Неразобранное» из приложения cats: `GET /api/cat-health/facts/unsorted` и `PATCH /api/cat-health/facts/{id}/block` под токеном здоровья (токен владельца).
 - 🐾 Коты: ситтер видит факты только открытых блоков (cat-care, /ask, читающий токен `/api/cats`); `blocks` в cat-care; закрыта дыра: /ask отдавал факты карточки «Я» про котов; лимиты 600 знаков / 40 общих фактов.
 - 🐾 Коты: блок факта (profile | care | health | relations | owner | unsorted) определяет, кто его видит; ставится в том же вызове Haiku, NULL = закрыто, владелец размечает `PATCH /api/cats/facts/{id}/block`; миграция `d3f5a7c9e124`; кейс 0037, эвал `cat_block_eval`.
 - 🧠 Память: кейс 0035 — «Я» разобрана по цитате (автор + лицо), а не по роду: категории (ключевые слова + Haiku), перевод текстов в ж.р. со строгим валидатором, дедуп без LLM; ссылки на `docs/CASES/0035-self-attribution.md`.

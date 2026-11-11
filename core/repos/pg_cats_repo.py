@@ -173,6 +173,21 @@ def list_general_facts_for_sitter(user_id: str) -> List[Dict]:
     return [_fact(r) for r in rows]
 
 
+UNSORTED_LIMIT = 200
+
+
+def list_unsorted_facts(user_id: str) -> List[Dict]:
+    """Факты про котов без разобранного блока (NULL или unsorted): привязанные к коту и общие; факты карточки человека не входят (у них блока нет и быть не может).
+    Для владельца: быстрая разметка в приложении. Старые первыми, не больше UNSORTED_LIMIT; кот без карточки или убранный отдаётся как «общий» (cat = None)."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            "SELECT m.id, m.fact_text, m.cat_block, ct.name AS cat_name FROM memories m LEFT JOIN cats ct ON ct.id = m.cat_id AND ct.user_id = m.user_id AND ct.status <> 'rejected' "
+            "WHERE m.category = :cat AND m.user_id = :u AND m.is_current AND NOT m.is_archived AND m.fact_text <> '' AND m.review_status <> 'rejected' "
+            "AND (m.cat_id IS NOT NULL OR m.person_id IS NULL) AND (m.cat_block IS NULL OR m.cat_block = 'unsorted') ORDER BY m.created_at, m.id LIMIT :n"),
+            {"cat": CATS_CATEGORY, "u": user_id, "n": UNSORTED_LIMIT}).all()
+    return [{"id": r.id, "text": r.fact_text, "cat": r.cat_name, "block": r.cat_block} for r in rows]
+
+
 def set_fact_block(user_id: str, memory_id: int, block: str) -> bool:
     """Блок факта про котов (core.cat_blocks) руками владельца. Только факт владельца в категории «🐾 Коты», который привязан к коту или общий
     (факт карточки человека сюда не относится: у него блок не ставится, он остаётся закрытым); архивные, стёртые и отклонённые не трогаем.

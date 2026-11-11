@@ -202,6 +202,8 @@ def test_every_route_opened_by_a_service_token_leaks_no_closed_fact(client):
             path = r.path
             for name in getattr(r, "param_convertors", {}):
                 path = path.replace("{%s}" % name, str(a if name == "cat_id" else 1))
+            if path.startswith("/api/cat-health/facts/"):
+                continue                                                                                # владельческая разметка: токен здоровья = токен владельца, закрытое он видеть должен (свой тест ниже)
             for method in sorted(r.methods - {"HEAD", "OPTIONS"}):
                 kw = {"json": {"q": "кто сидит в комнате"}} if method in ("POST", "PUT", "PATCH", "DELETE") else {}
                 got = tc.request(method, path, headers=tok, **kw)

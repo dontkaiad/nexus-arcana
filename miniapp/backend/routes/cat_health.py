@@ -13,8 +13,10 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from core import cat_blocks
 from core import cat_health as svc
 from core.repos import pg_cat_health_repo as repo
+from core.repos import pg_cats_repo as cats_repo
 from core.user_manager import get_user_id
 from miniapp.backend.cats_write_auth import cats_write_gate
 
@@ -220,6 +222,31 @@ async def delete_med(med_id: int, owner_tg: int = Depends(cats_write_gate)) -> D
     if not await svc.delete_med(owner_tg, med_id):
         raise HTTPException(status_code=404, detail="not found")
     return {"ok": True}
+
+
+# ── неразобранные факты про котов (быстрая разметка блока владельцем из приложения cats) ──────────────────────────────────
+
+@router.get("/facts/unsorted")
+async def unsorted_facts(owner_tg: int = Depends(cats_write_gate)) -> Dict[str, Any]:
+    """Факты про котов без блока (NULL или unsorted), только факты владельца: для разметки одним нажатием. Токен здоровья — токен владельца: ситтеру он не выдаётся."""
+    user_id = await _uid(owner_tg)
+    facts = await asyncio.to_thread(cats_repo.list_unsorted_facts, user_id)
+    return {"facts": [{"id": f["id"], "text": f["text"], "cat": f["cat"]} for f in facts]}
+
+
+class FactBlock(BaseModel):
+    block: str
+
+
+@router.patch("/facts/{memory_id}/block")
+async def set_fact_block(memory_id: int, body: FactBlock, owner_tg: int = Depends(cats_write_gate)) -> Dict[str, Any]:
+    """Поставить блок факту (то же правило, что PATCH /api/cats/facts/{id}/block): неизвестный блок 422, чужой / не про котов / карточка человека 404."""
+    if body.block not in cat_blocks.BLOCKS:
+        raise HTTPException(status_code=422, detail="bad block")
+    user_id = await _uid(owner_tg)
+    if not await asyncio.to_thread(cats_repo.set_fact_block, user_id, memory_id, body.block):
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True, "fact_id": memory_id, "block": body.block}
 
 
 # ── сводка ────────────────────────────────────────────────────────────────────────────────────────────────────────────

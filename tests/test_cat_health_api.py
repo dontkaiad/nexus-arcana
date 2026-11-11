@@ -99,6 +99,7 @@ ROUTES = {
     ("GET", "/api/cat-health/cats/{cat_id}/meds"), ("POST", "/api/cat-health/cats/{cat_id}/meds"),
     ("PATCH", "/api/cat-health/meds/{med_id}"), ("DELETE", "/api/cat-health/meds/{med_id}"),
     ("GET", "/api/cat-health/upcoming"),
+    ("GET", "/api/cat-health/facts/unsorted"), ("PATCH", "/api/cat-health/facts/{memory_id}/block"),
 }
 
 
