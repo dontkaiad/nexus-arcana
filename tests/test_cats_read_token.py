@@ -59,7 +59,7 @@ def one_cat():
     cid = crepo.create(MARK, "Тучка", ["Туча"])
     with get_engine().begin() as c:
         c.execute(insert(memories).values(fact_text="Тучка любит окно", key_name="k1", category="🐾 Коты",
-                                          user_id=MARK, review_status="confirmed", cat_id=cid))
+                                          user_id=MARK, review_status="confirmed", cat_id=cid, cat_block="care"))
     return cid
 
 

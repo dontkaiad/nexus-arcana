@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import insert, select, text, update
 
+from core import cat_blocks
 from core.db import get_engine
 from core.people import aliases_norm_for, mention_candidates
 from core.repos.cats_tables import CAT_STATUSES, cats
@@ -119,17 +120,22 @@ def _fact(r) -> Dict:
             "created_at": r.created_at, "updated_at": r.updated_at, "related_to": r.related_to, "block": r.cat_block}
 
 
-def list_facts(user_id: str, cat_id: int) -> List[Dict]:
-    """Факты кота: не архивные, не стёртые (пустой текст = tombstone), не rejected; по времени создания."""
+def _only_sitter(for_sitter: bool) -> str:
+    """Добавка к WHERE: для ситтера (читающие токены) только факты, открытые блоком (core.cat_blocks.sitter_sql)."""
+    return " AND " + cat_blocks.sitter_sql() if for_sitter else ""
+
+
+def list_facts(user_id: str, cat_id: int, for_sitter: bool = False) -> List[Dict]:
+    """Факты кота: не архивные, не стёртые (пустой текст = tombstone), не rejected; по времени создания. for_sitter — только открытые блоком."""
     with get_engine().connect() as c:
         rows = c.execute(text(
             f"SELECT {_FACT_COLS} FROM memories WHERE cat_id = :c AND user_id = :u AND NOT is_archived "
-            "AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            "AND fact_text <> '' AND review_status <> 'rejected'" + _only_sitter(for_sitter) + " ORDER BY created_at, id"),
             {"c": cat_id, "u": user_id}).all()
     return [_fact(r) for r in rows]
 
 
-def list_facts_many(user_id: str, cat_ids: List[int]) -> Dict[int, List[Dict]]:
+def list_facts_many(user_id: str, cat_ids: List[int], for_sitter: bool = False) -> Dict[int, List[Dict]]:
     """Факты сразу нескольких котов одним запросом ({cat_id: [факты по времени создания]}); те же условия, что у list_facts."""
     out: Dict[int, List[Dict]] = {int(i): [] for i in cat_ids}
     if not out:
@@ -137,7 +143,7 @@ def list_facts_many(user_id: str, cat_ids: List[int]) -> Dict[int, List[Dict]]:
     with get_engine().connect() as c:
         rows = c.execute(text(
             f"SELECT cat_id, {_FACT_COLS} FROM memories WHERE cat_id = ANY(:ids) AND user_id = :u AND NOT is_archived "
-            "AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            "AND fact_text <> '' AND review_status <> 'rejected'" + _only_sitter(for_sitter) + " ORDER BY created_at, id"),
             {"ids": list(out), "u": user_id}).all()
     for r in rows:
         out[int(r.cat_id)].append(_fact(r))
@@ -162,7 +168,7 @@ def list_general_facts_for_sitter(user_id: str) -> List[Dict]:
     with get_engine().connect() as c:
         rows = c.execute(text(
             f"SELECT {_FACT_COLS} FROM memories WHERE category = :cat AND cat_id IS NULL AND person_id IS NULL AND user_id = :u "
-            "AND is_current AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            "AND is_current AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' AND " + cat_blocks.sitter_sql() + " ORDER BY created_at, id"),
             {"cat": CATS_CATEGORY, "u": user_id}).all()
     return [_fact(r) for r in rows]
 
@@ -179,7 +185,7 @@ def set_fact_block(user_id: str, memory_id: int, block: str) -> bool:
     return res.rowcount == 1
 
 
-def facts_count(user_id: str, cat_ids: List[int]) -> Dict[int, int]:
+def facts_count(user_id: str, cat_ids: List[int], for_sitter: bool = False) -> Dict[int, int]:
     """{cat_id: число видимых фактов} (те же условия, что у list_facts); коты без фактов — 0."""
     out = {int(i): 0 for i in cat_ids}
     if not out:
@@ -187,7 +193,7 @@ def facts_count(user_id: str, cat_ids: List[int]) -> Dict[int, int]:
     with get_engine().connect() as c:
         for r in c.execute(text(
                 "SELECT cat_id, count(*) AS n FROM memories WHERE cat_id = ANY(:ids) AND user_id = :u AND NOT is_archived "
-                "AND fact_text <> '' AND review_status <> 'rejected' GROUP BY cat_id"),
+                "AND fact_text <> '' AND review_status <> 'rejected'" + _only_sitter(for_sitter) + " GROUP BY cat_id"),
                 {"ids": list(out), "u": user_id}):
             out[int(r.cat_id)] = int(r.n)
     return out

@@ -2,7 +2,8 @@
 
 Источники (и только они; SQL написан на фиксированные таблицы, а не фильтр общего поиска по Памяти):
   1. факты про котов (memories.cat_id IS NOT NULL);
-  2. «Общее про котов» (категория «🐾 Коты», cat_id пуст);
+  2. «Общее про котов» (категория «🐾 Коты», cat_id пуст, не факт карточки человека);
+  оба только открытые блоком (`cat_blocks.sitter_sql`: profile / care / relations, health только «критично»; owner, unsorted, NULL закрыты);
   3. пункты nexus_lists, которые видит ситтер — то же условие `sitter_visible_clause`, что у GET /api/sitter/lists
      (инвентарь по умолчанию, кроме скрытых; покупки и чеклисты по for_sitter).
 Люди, финансы, остальная Память, прочие списки, чужие владельцы недоступны по построению.
@@ -24,6 +25,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from sqlalchemy import func, literal_column, select, text
 
+from core import cat_blocks
 from core.db import get_engine
 from core.memory_search import fts_query
 from core import sitter_expand
@@ -148,7 +150,8 @@ def _facts_sql(n_extra: int):
       AND (m.cat_id IS NOT NULL OR m.category = :cat)
       AND m.is_current = true AND m.is_archived = false AND m.review_status = 'confirmed' AND m.fact_text <> ''
       AND (c.id IS NULL OR c.status <> 'rejected')
-""" % ", ".join(ranks))
+      AND m.person_id IS NULL AND %s
+""" % (", ".join(ranks), cat_blocks.sitter_sql("m")))
 
 
 def extra_terms(words: Optional[List[str]]) -> List[str]:

@@ -91,7 +91,7 @@ def test_hostile_text_is_returned_as_json_data_only(payload):
     cid = crepo.create(MARK, payload[:60], [payload[:30]])
     with get_engine().begin() as c:
         c.execute(insert(memories).values(fact_text=payload, key_name="k1", category="🐾 Коты", user_id=MARK,
-                                          review_status="confirmed", cat_id=cid))
+                                          review_status="confirmed", cat_id=cid, cat_block="care"))
     r = TestClient(app).get("/api/cats", params={"with_facts": 1}, headers=HDR)
     assert r.headers["content-type"].split(";")[0] == "application/json"       # браузер не примет за HTML
     assert r.headers["x-content-type-options"] == "nosniff"

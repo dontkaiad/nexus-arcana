@@ -68,6 +68,7 @@ def client():
 
 def fact(cat_id, text_, kind="other", user=MARK, **kw):
     vals = dict(fact_text=text_, key_name=(cat_fact_key(cat_id, kind, text_) if cat_id is not None else "cats_general_" + str(abs(hash(text_)) % 10**8)), category="🐾 Коты", related_to="", user_id=user, review_status="confirmed", cat_id=cat_id)
+    vals.setdefault("cat_block", "care")                                  # без блока факт закрыт ситтеру (NULL): тесты, где это не предмет, ставят открытый
     vals.update(kw)
     with get_engine().begin() as c:
         return c.execute(insert(memories).values(**vals).returning(memories.c.id)).scalar_one()
@@ -104,12 +105,12 @@ def test_texts_are_the_same_as_in_the_owner_cards_and_are_clipped_and_capped(cli
     fact(a, "Тучка не ест курицу", "important")
     for i in range(12):
         fact(a, f"внешность {i}", "other")
-    fact(a, "я" * 400, "likes")
+    fact(a, "я" * 700, "likes")
     f = get(client).json()["cats"][0]["facts"]
     from core.cats import group_facts
     same = [i["text"] for g in group_facts(crepo.list_facts(MARK, a), "Тучка", None) if g["type"] == "important" for i in g["items"]]
     assert f["important"] == same and len(same) == 1                                # the one place that shapes a fact's text (name prefix included)
-    assert len(f["other"]) == 8 and len(f["likes"][0]) == 300 and f["likes"][0].endswith("…")
+    assert len(f["other"]) == 8 and len(f["likes"][0]) == 600 and f["likes"][0].endswith("…")
 
 
 def test_only_current_courses_without_the_hidden_ones(client):
@@ -195,7 +196,7 @@ def test_the_field_set_is_minimal_and_nothing_else_leaks(client):
     v = health.add_visit(MARK, a, "осмотр", D(3), clinic="Секретная клиника", note="секретная заметка визита", next_due=D(300))
     health.update_visit(MARK, v["id"], {"sitter_visible": True})
     body = get(client).json()
-    assert set(body) == {"today", "cats", "general", "meds", "weights", "visits"}
+    assert set(body) == {"today", "cats", "general", "blocks", "meds", "weights", "visits"} and set(body["blocks"]) == {"profile", "care", "relations"}
     assert set(body["cats"][0]) == {"id", "name", "photo_url", "facts"} and set(body["cats"][0]["facts"]) == {"important", "other", "likes", "dislikes"}
     assert set(body["meds"][0]) == {"cat_id", "name", "dose", "times_per_day", "ends_on", "days_left"}
     assert set(body["weights"][0]) == {"cat_id", "weighed_on", "grams"}
@@ -255,34 +256,36 @@ def test_general_has_no_cat_facts_no_person_facts_and_no_other_category(client):
 
 
 def test_general_is_clipped_capped_and_only_strings(client):
-    general("я" * 400)                                                              # first in order, so it is inside the cap
+    general("я" * 700)                                                              # first in order, so it is inside the cap
     for i in range(15):
         general(f"общее {i}")
     body = get(client).json()
-    assert len(body["general"]) == 16 and all(isinstance(t, str) for t in body["general"])      # 16 < the limit of 20: all shown
+    assert len(body["general"]) == 16 and all(isinstance(t, str) for t in body["general"])      # 16 < the limit: all shown
     from core.sitter_cat_care import FACT_TEXT
     assert all(len(t) <= FACT_TEXT for t in body["general"]) and body["general"][0].endswith("…")
 
 
-def test_the_limit_is_twenty_and_a_cut_is_logged_with_a_number_only(client, caplog):
+def test_the_limit_is_forty_and_a_cut_is_logged_with_a_number_only(client, caplog):
     import logging
-    for i in range(21):
+    from core.sitter_cat_care import GENERAL_LIMIT
+    assert GENERAL_LIMIT == 40
+    for i in range(41):
         general(f"секретный-текст-{i:02d}")
     with caplog.at_level(logging.WARNING, logger="core.sitter_cat_care"):
         body = get(client).json()
-    assert len(body["general"]) == 20 and body["general"][0] == "секретный-текст-00" and body["general"][-1] == "секретный-текст-19"
+    assert len(body["general"]) == 40 and body["general"][0] == "секретный-текст-00" and body["general"][-1] == "секретный-текст-39"
     msgs = [r for r in caplog.records if r.name == "core.sitter_cat_care" and r.levelno == logging.WARNING]
-    assert len(msgs) == 1 and ": 1 general fact" in msgs[0].getMessage() and "20" in msgs[0].getMessage()
+    assert len(msgs) == 1 and ": 1 general fact" in msgs[0].getMessage() and "40" in msgs[0].getMessage()
     assert "секретный" not in caplog.text                                         # never the texts
 
 
 def test_exactly_at_the_limit_nothing_is_cut_and_nothing_is_logged(client, caplog):
     import logging
-    for i in range(20):
+    for i in range(40):
         general(f"факт {i:02d}")
     with caplog.at_level(logging.WARNING, logger="core.sitter_cat_care"):
         body = get(client).json()
-    assert len(body["general"]) == 20 and not [r for r in caplog.records if r.name == "core.sitter_cat_care"]
+    assert len(body["general"]) == 40 and not [r for r in caplog.records if r.name == "core.sitter_cat_care"]
 
 
 def test_general_leaks_no_ids_keys_or_dates_and_no_other_owner(client):

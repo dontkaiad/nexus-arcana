@@ -15,6 +15,21 @@ from typing import Iterable, Optional
 BLOCKS = ("profile", "care", "health", "relations", "owner", "unsorted")
 SITTER_BLOCKS = ("profile", "care", "relations")
 CRITICAL_TYPE = "important"                       # «критично»: существующий тип факта кота (ключ cat_<id>_important_<hash>)
+_CRITICAL_KEY_SQL = r"^cat_[0-9]+_important_[0-9a-f]{8}$"
+_CRITICAL_KEY_RE = re.compile(_CRITICAL_KEY_SQL)
+
+
+def critical_key(key_name: Optional[str]) -> Optional[str]:
+    """«important», если ключ факта строго вида cat_<id>_important_<hash8>, иначе None. Только ключ, без догадок по тексту: у фактов без такого
+    ключа (в том числе «общие») «критично» нет, и health для ситтера остаётся закрытым."""
+    return CRITICAL_TYPE if _CRITICAL_KEY_RE.match(key_name or "") else None
+
+
+def sitter_sql(alias: str = "") -> str:
+    """Условие SQL «факт открыт ситтеру» (то же правило, что `audience`): блок profile / care / relations или health с «критичным» ключом.
+    NULL и всё остальное в условие не попадают (NULL IN (...) не истина). Вставлять в WHERE каждого запроса, который отдаёт факты про котов ситтеру."""
+    a = alias + "." if alias else ""
+    return ("(%scat_block IN ('profile', 'care', 'relations') OR (%scat_block = 'health' AND %skey_name ~ '%s'))" % (a, a, a, _CRITICAL_KEY_SQL))
 
 _CAT_WORDS = re.compile(r"\bкот|кошк|котик|котят|котён|котен|питомец|питомц|\bкиса\b|\bкису\b|\bкисе\b", re.I)
 
