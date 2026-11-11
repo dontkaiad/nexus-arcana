@@ -157,6 +157,16 @@ def list_general_facts(user_id: str) -> List[Dict]:
     return [_fact(r) for r in rows]
 
 
+def list_general_facts_for_sitter(user_id: str) -> List[Dict]:
+    """«Общее про котов» для ситтера: только актуальные, без привязки к кому-либо (ни к коту, ни к карточке человека, в том числе «Я»), по времени создания."""
+    with get_engine().connect() as c:
+        rows = c.execute(text(
+            f"SELECT {_FACT_COLS} FROM memories WHERE category = :cat AND cat_id IS NULL AND person_id IS NULL AND user_id = :u "
+            "AND is_current AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
+            {"cat": CATS_CATEGORY, "u": user_id}).all()
+    return [_fact(r) for r in rows]
+
+
 def facts_count(user_id: str, cat_ids: List[int]) -> Dict[int, int]:
     """{cat_id: число видимых фактов} (те же условия, что у list_facts); коты без фактов — 0."""
     out = {int(i): 0 for i in cat_ids}

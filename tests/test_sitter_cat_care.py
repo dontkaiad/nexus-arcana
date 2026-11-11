@@ -67,7 +67,7 @@ def client():
 
 
 def fact(cat_id, text_, kind="other", user=MARK, **kw):
-    vals = dict(fact_text=text_, key_name=cat_fact_key(cat_id, kind, text_), category="🐾 Коты", related_to="", user_id=user, review_status="confirmed", cat_id=cat_id)
+    vals = dict(fact_text=text_, key_name=(cat_fact_key(cat_id, kind, text_) if cat_id is not None else "cats_general_" + str(abs(hash(text_)) % 10**8)), category="🐾 Коты", related_to="", user_id=user, review_status="confirmed", cat_id=cat_id)
     vals.update(kw)
     with get_engine().begin() as c:
         return c.execute(insert(memories).values(**vals).returning(memories.c.id)).scalar_one()
@@ -195,7 +195,7 @@ def test_the_field_set_is_minimal_and_nothing_else_leaks(client):
     v = health.add_visit(MARK, a, "осмотр", D(3), clinic="Секретная клиника", note="секретная заметка визита", next_due=D(300))
     health.update_visit(MARK, v["id"], {"sitter_visible": True})
     body = get(client).json()
-    assert set(body) == {"today", "cats", "meds", "weights", "visits"}
+    assert set(body) == {"today", "cats", "general", "meds", "weights", "visits"}
     assert set(body["cats"][0]) == {"id", "name", "photo_url", "facts"} and set(body["cats"][0]["facts"]) == {"important", "other", "likes", "dislikes"}
     assert set(body["meds"][0]) == {"cat_id", "name", "dose", "times_per_day", "ends_on", "days_left"}
     assert set(body["weights"][0]) == {"cat_id", "weighed_on", "grams"}
@@ -213,6 +213,70 @@ def test_days_are_nexus_own_in_the_owner_zone(client):
         body = get(client).json()
     assert body["today"] == D(1).isoformat() and body["visits"][0]["days_until"] == 1 and body["meds"][0]["days_left"] == 2
     assert v and m
+
+
+# ── general facts («Общее про котов») ─────────────────────────────────────────────────────────────────────────────────
+
+def general(text_, user=MARK, **kw):
+    return fact(None, text_, "other", user=user, **kw)
+
+
+def test_general_facts_are_current_texts_only_in_creation_order(client):
+    general("правило один")
+    general("правило два")
+    general("устарело", is_current=False)
+    general("архив", is_archived=True)
+    general("отклонено", review_status="rejected")
+    general("", review_status="confirmed")
+    assert get(client).json()["general"] == ["правило один", "правило два"]
+
+
+def test_general_has_no_cat_facts_no_person_facts_and_no_other_category(client):
+    a = crepo.create(MARK, "Тучка")
+    fact(a, "факт кота", "important")
+    general("общее нормальное")
+    general("про человека", person_id=None, related_to="Имя")                      # related_to alone does not hide a general fact
+    other_cat = fact(None, "из другой категории", "other", category="💼 Работа")
+    with get_engine().begin() as c:
+        pid = c.execute(text("INSERT INTO people (user_id, name, is_self) VALUES (:u, 'Кто-то', false) RETURNING id"), {"u": MARK}).scalar_one()
+        me = c.execute(text("INSERT INTO people (user_id, name, is_self) VALUES (:u, 'Я', true) RETURNING id"), {"u": MARK}).scalar_one()
+    general("факт чужой карточки", person_id=pid)
+    general("факт карточки Я", person_id=me)
+    try:
+        got = get(client).json()["general"]
+        assert "факт кота" not in got and "из другой категории" not in got
+        assert "факт чужой карточки" not in got and "факт карточки Я" not in got
+        assert got == ["общее нормальное", "про человека"]
+    finally:
+        with get_engine().begin() as c:
+            c.execute(delete(memories).where(memories.c.user_id == MARK))
+            c.execute(text("DELETE FROM people WHERE user_id = :u"), {"u": MARK})
+    assert other_cat
+
+
+def test_general_is_clipped_capped_and_only_strings(client):
+    general("я" * 400)                                                              # first in order, so it is inside the cap
+    for i in range(15):
+        general(f"общее {i}")
+    body = get(client).json()
+    assert len(body["general"]) == 12 and all(isinstance(t, str) for t in body["general"])
+    from core.sitter_cat_care import FACT_TEXT
+    assert all(len(t) <= FACT_TEXT for t in body["general"]) and body["general"][0].endswith("…")
+
+
+def test_general_leaks_no_ids_keys_or_dates_and_no_other_owner(client):
+    general("видно ситтеру", source="manual")
+    general("чужое общее", user=OTHER)
+    body = get(client).json()
+    assert body["general"] == ["видно ситтеру"]
+    blob = json.dumps(body, ensure_ascii=False)
+    for secret in ("чужое", "cats_general", "cat_", "key_name", "created_at", "updated_at", "source", "review_status", "related_to", "user_id", MARK):
+        assert secret not in blob
+
+
+def test_general_is_empty_list_when_there_are_none(client):
+    crepo.create(MARK, "Тучка")
+    assert get(client).json()["general"] == []
 
 
 # ── isolation and tokens ──────────────────────────────────────────────────────────────────────────────────────────────

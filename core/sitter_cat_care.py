@@ -1,6 +1,6 @@
 """core/sitter_cat_care.py — паспорта котов для ситтера: GET /api/sitter/cat-care (читающий токен ситтера).
 
-Что получает ситтер: карточки котов (имя, фото, актуальные факты четырёх типов), ДЕЙСТВУЮЩИЕ лекарства (без скрытых владельцем), а вес и визиты
+Что получает ситтер: карточки котов (имя, фото, актуальные факты четырёх типов), «Общее про котов» (список текстов), ДЕЙСТВУЮЩИЕ лекарства (без скрытых владельцем), а вес и визиты
 ТОЛЬКО те, что владелец открыл флагом `sitter_visible`. Минимальный набор полей: без id фактов, кличек, заметок, клиник, следующих сроков, id задач,
 статусов курса и любых денег (их в данных нет). Даты и «дней до» считает Nexus в часовом поясе владельца; приложение cats ничего не пересчитывает.
 Окно доступа ситтера (даты stay) проверяет приложение cats, Nexus его не знает: токен читающий и узкий, как у /api/sitter/lists.
@@ -16,6 +16,7 @@ from core.repos import pg_cat_health_repo as health
 from core.repos import pg_cats_repo as cats_repo
 
 FACT_LIMITS = {"important": 8, "other": 8, "likes": 6, "dislikes": 6}
+GENERAL_LIMIT = 12
 FACT_TEXT = 300
 
 
@@ -40,9 +41,11 @@ def payload(user_id: str, today: date) -> Dict[str, Any]:
     cats = _cats_payload(user_id)
     shown = {c["id"] for c in cats}                              # only cats that have a card: a pending or removed cat has no health here either
     meds = [m for m in health.current_meds(user_id, today, for_sitter=True) if m["cat_id"] in shown]
+    general = [_clip(f["text"]) for f in cats_repo.list_general_facts_for_sitter(user_id)][:GENERAL_LIMIT]
     return {
         "today": today.isoformat(),
         "cats": cats,
+        "general": general,                                      # «Общее про котов»: только тексты, без id и привязок
         "meds": [{"cat_id": m["cat_id"], "name": m["name"], "dose": m["dose"], "times_per_day": m["times_per_day"],
                   "ends_on": m["ends_on"].isoformat() if m["ends_on"] else None,
                   "days_left": (m["ends_on"] - today).days if m["ends_on"] else None} for m in meds],
