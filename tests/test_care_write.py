@@ -256,7 +256,7 @@ def test_write_token_opens_exactly_the_two_write_routes():
 
 
 def test_read_token_opens_exactly_the_read_routes():
-    assert _opened_by(R) == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask")}
+    assert _opened_by(R) == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask"), ("GET", "/api/sitter/cat-care")}
 
 
 # ── done ──────────────────────────────────────────────────────────────────────

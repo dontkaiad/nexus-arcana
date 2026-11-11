@@ -416,9 +416,9 @@ def test_budget_window_slides():
     assert b.take() == 0
 
 
-def test_read_token_opens_exactly_three_routes_now():
+def test_read_token_opens_exactly_the_four_routes_now():
     from tests.test_care_write import _opened_by
-    assert _opened_by(OK) == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask")}
+    assert _opened_by(OK) == {("GET", "/api/sitter/lists"), ("GET", "/api/care/schedule"), ("POST", "/api/sitter/ask"), ("GET", "/api/sitter/cat-care")}
 
 
 def test_answer_is_never_composed_by_llm(monkeypatch):
