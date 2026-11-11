@@ -259,9 +259,30 @@ def test_general_is_clipped_capped_and_only_strings(client):
     for i in range(15):
         general(f"общее {i}")
     body = get(client).json()
-    assert len(body["general"]) == 12 and all(isinstance(t, str) for t in body["general"])
+    assert len(body["general"]) == 16 and all(isinstance(t, str) for t in body["general"])      # 16 < the limit of 20: all shown
     from core.sitter_cat_care import FACT_TEXT
     assert all(len(t) <= FACT_TEXT for t in body["general"]) and body["general"][0].endswith("…")
+
+
+def test_the_limit_is_twenty_and_a_cut_is_logged_with_a_number_only(client, caplog):
+    import logging
+    for i in range(21):
+        general(f"секретный-текст-{i:02d}")
+    with caplog.at_level(logging.WARNING, logger="core.sitter_cat_care"):
+        body = get(client).json()
+    assert len(body["general"]) == 20 and body["general"][0] == "секретный-текст-00" and body["general"][-1] == "секретный-текст-19"
+    msgs = [r for r in caplog.records if r.name == "core.sitter_cat_care" and r.levelno == logging.WARNING]
+    assert len(msgs) == 1 and ": 1 general fact" in msgs[0].getMessage() and "20" in msgs[0].getMessage()
+    assert "секретный" not in caplog.text                                         # never the texts
+
+
+def test_exactly_at_the_limit_nothing_is_cut_and_nothing_is_logged(client, caplog):
+    import logging
+    for i in range(20):
+        general(f"факт {i:02d}")
+    with caplog.at_level(logging.WARNING, logger="core.sitter_cat_care"):
+        body = get(client).json()
+    assert len(body["general"]) == 20 and not [r for r in caplog.records if r.name == "core.sitter_cat_care"]
 
 
 def test_general_leaks_no_ids_keys_or_dates_and_no_other_owner(client):
