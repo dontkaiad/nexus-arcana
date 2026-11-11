@@ -17,9 +17,10 @@ from core.repos import pg_cat_health_repo as health
 from core.repos import pg_cats_repo as cats_repo
 
 FACT_LIMITS = {"important": 8, "other": 8, "likes": 6, "dislikes": 6}
-GENERAL_LIMIT = 20
+GENERAL_LIMIT = 40                                               # правила ухода из гайда переезжают сюда: 20 уже не хватает
 logger = logging.getLogger(__name__)
-FACT_TEXT = 300
+FACT_TEXT = 600                                                  # поилка целиком (5 шагов) не помещалась в 300
+GENERAL_BLOCKS = ("profile", "care", "relations")                # блоки «общего» для ситтера (health общий открыть нечем: у общих фактов нет «критичного» ключа)
 
 
 def _clip(text: str) -> str:
@@ -28,7 +29,7 @@ def _clip(text: str) -> str:
 
 def _cats_payload(user_id: str) -> List[Dict[str, Any]]:
     rows = [c for c in cats_repo.list_cats(user_id) if c["status"] == "confirmed"]
-    by_cat = cats_repo.list_facts_many(user_id, [c["id"] for c in rows])
+    by_cat = cats_repo.list_facts_many(user_id, [c["id"] for c in rows], for_sitter=True)    # только открытые блоком: owner / unsorted / NULL / не «критичное» health не читаются
     out = []
     for c in rows:
         lists: Dict[str, List[str]] = {k: [] for k in FACT_LIMITS}
@@ -44,13 +45,16 @@ def payload(user_id: str, today: date) -> Dict[str, Any]:
     shown = {c["id"] for c in cats}                              # only cats that have a card: a pending or removed cat has no health here either
     meds = [m for m in health.current_meds(user_id, today, for_sitter=True) if m["cat_id"] in shown]
     all_general = cats_repo.list_general_facts_for_sitter(user_id)
-    general = [_clip(f["text"]) for f in all_general[:GENERAL_LIMIT]]
+    shown = all_general[:GENERAL_LIMIT]
+    general = [_clip(f["text"]) for f in shown]
+    blocks = {b: [_clip(f["text"]) for f in shown if f.get("block") == b] for b in GENERAL_BLOCKS}
     if len(all_general) > GENERAL_LIMIT:                         # the sitter would silently miss the rest: say how many (a number only, never the texts)
         logger.warning("sitter cat-care: %d general fact(s) cut by the limit of %d", len(all_general) - GENERAL_LIMIT, GENERAL_LIMIT)
     return {
         "today": today.isoformat(),
         "cats": cats,
         "general": general,                                      # «Общее про котов»: только тексты, без id и привязок
+        "blocks": blocks,                                        # те же тексты по блокам (profile / care / relations), для вкладки «Коты»
         "meds": [{"cat_id": m["cat_id"], "name": m["name"], "dose": m["dose"], "times_per_day": m["times_per_day"],
                   "ends_on": m["ends_on"].isoformat() if m["ends_on"] else None,
                   "days_left": (m["ends_on"] - today).days if m["ends_on"] else None} for m in meds],

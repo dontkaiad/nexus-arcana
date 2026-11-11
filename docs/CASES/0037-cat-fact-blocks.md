@@ -57,9 +57,16 @@ so 100% is "no error found", not a guarantee; the one-time sorting of the real f
 
 ## Not covered
 
-- The sitter endpoint (`/api/sitter/cat-care`, `/api/sitter/ask`) does not read blocks yet (PR 2). Until then nothing changes for the sitter.
-- The app reads the cards by the Bearer token with all facts (`/api/cats?with_facts=1`): the next PRs must give the sitter's passport the block-aware data.
 - Existing facts have NULL (closed) until the one-time sorting (step 5).
+- The app tab «Коты» (blocks below the passports, "unsorted" for the owner) is step 3; moving the guide rules into the `care` block is step 4.
+
+## Step 2: the sitter reads only open blocks
+
+`core/cat_blocks.sitter_sql` is the single SQL condition (profile, care, relations, or health with a strict "critical" key); NULL is never true. It is used by the repo
+queries behind `GET /api/sitter/cat-care`, `POST /api/sitter/ask`, and `GET /api/cats` + `/api/cats/{id}` under the Bearer read token (counts too). A leak test runs one world
+(every block, NULL, a fake critical key, a person-card fact with block `care`, archived, rejected, another owner) through all of them and through every route opened by a
+service token. It also found an existing hole: the search used by `/ask` returned the owner's own person-card facts about the cats (they have a category «🐾 Коты» and no cat).
+Limits raised for the rules moving in from the guide: a fact text 300 → 600, general facts 20 → 40.
 
 ## One-time sorting of existing facts (step 5, `scripts/sort_cat_blocks.py`)
 

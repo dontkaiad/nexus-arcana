@@ -54,7 +54,7 @@ def _fact(cat_id, text_, kind):
     with get_engine().begin() as c:
         c.execute(insert(memories).values(
             fact_text=text_, key_name=cat_fact_key(cat_id, kind, text_), category="🐾 Коты", related_to="",
-            user_id=MARK, review_status="confirmed", cat_id=cat_id))
+            user_id=MARK, review_status="confirmed", cat_id=cat_id, cat_block="care"))
 
 
 def _care_task(title, label, done_by=None):
@@ -77,7 +77,7 @@ def world():
     _fact(p, "Пончик рыжий, короткая шерсть", "other")
     with get_engine().begin() as c:                            # факт без привязки к коту — в списке только счётчик
         c.execute(insert(memories).values(fact_text="кошкам нужна свежая вода", key_name="g1", category="🐾 Коты",
-                                          user_id=MARK, review_status="confirmed"))
+                                          user_id=MARK, review_status="confirmed", cat_block="care"))
     _care_task("Поменять лоток (метка)", "лотки", done_by="sitter")           # последнее выполнение — от ситтера
     _care_task("Поменять воду (метка)", "вода")                              # ещё ни разу не отмечено
     return {"t": t, "p": p}

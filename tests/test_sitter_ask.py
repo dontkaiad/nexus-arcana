@@ -97,6 +97,7 @@ def _env(monkeypatch):
 
 def add_fact(txt, user=USER, cat_id=None, category="🐾 Коты", embed=False, **kw):
     vals = dict(fact_text=txt, user_id=user, cat_id=cat_id, category=category, related_to="", **kw)
+    vals.setdefault("cat_block", "care")                                  # без блока факт закрыт ситтеру (NULL): тесты, где это не предмет, ставят открытый
     with get_engine().begin() as c:
         mid = c.execute(insert(memories).values(**vals).returning(memories.c.id)).scalar()
         if embed:

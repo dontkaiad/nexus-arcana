@@ -60,12 +60,13 @@ async def list_cats(request: Request, with_facts: bool = Query(False, descriptio
     user_id = await _owner(tg_id)
     rows: List[Dict[str, Any]] = await asyncio.to_thread(repo.list_cats, user_id)
     ids = [r["id"] for r in rows]
-    general = await asyncio.to_thread(repo.list_general_facts, user_id)
+    sitter = not _owner_session(request)                         # чтение по Bearer-токену (приложение cats для ситтера и владельца): только открытое блоком
+    general = await asyncio.to_thread(repo.list_general_facts_for_sitter if sitter else repo.list_general_facts, user_id)
     if not with_facts:
-        counts = await asyncio.to_thread(repo.facts_count, user_id, ids)
+        counts = await asyncio.to_thread(repo.facts_count, user_id, ids, sitter)
         out = [_cat_out(r, counts.get(r["id"], 0)) for r in rows]
     else:
-        by_cat = await asyncio.to_thread(repo.list_facts_many, user_id, ids)
+        by_cat = await asyncio.to_thread(repo.list_facts_many, user_id, ids, sitter)
         out = []
         for r in rows:
             facts = by_cat.get(r["id"], [])
@@ -88,7 +89,7 @@ async def cat_card(cat_id: int, request: Request, tg_id: int = Depends(current_u
     c = await asyncio.to_thread(repo.get_cat, user_id, cat_id)
     if not c or c["status"] == "rejected":
         raise HTTPException(status_code=404, detail="cat not found")
-    facts = await asyncio.to_thread(repo.list_facts, user_id, cat_id)
+    facts = await asyncio.to_thread(repo.list_facts, user_id, cat_id, not _owner_session(request))
     return {**_cat_out(c, len(facts)), "facts": group_facts(facts, c["name"], c.get("aliases"), with_block=_owner_session(request))}
 
 
