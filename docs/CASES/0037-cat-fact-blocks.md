@@ -60,3 +60,12 @@ so 100% is "no error found", not a guarantee; the one-time sorting of the real f
 - The sitter endpoint (`/api/sitter/cat-care`, `/api/sitter/ask`) does not read blocks yet (PR 2). Until then nothing changes for the sitter.
 - The app reads the cards by the Bearer token with all facts (`/api/cats?with_facts=1`): the next PRs must give the sitter's passport the block-aware data.
 - Existing facts have NULL (closed) until the one-time sorting (step 5).
+
+## One-time sorting of existing facts (step 5, `scripts/sort_cat_blocks.py`)
+
+Existing facts have no block (NULL = closed). The script builds a **plan** (dry-run, no writes): for each current cat-category fact without a block it decides
+a block (a person-card fact is `owner` by rule; the owner's `--override ID=BLOCK` wins; guards turn money / plans / feelings into `owner`, passwords / codes /
+links into `unsorted`, medicine words into `health`; otherwise one Haiku call for all facts, a sitter block is accepted only when the model says it is sure),
+prints the table `id → block → audience` and saves the plan (mode 600). `--apply --plan FILE --rollback FILE` writes exactly that plan in one transaction
+(each row must be unchanged since the dry-run and still without a block; the rollback file is written first); `--undo FILE` restores. The database dump before
+`--apply` is made by a person. The "needs a drug" fact is reported separately: it is `health`, closed, and no course is created (no dose, no dates).
