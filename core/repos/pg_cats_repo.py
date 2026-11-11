@@ -111,12 +111,12 @@ def cat_names(user_id: str) -> List[str]:
 
 CATS_CATEGORY = "🐾 Коты"
 _FACT_COLS = ("id, fact_text, key_name, is_current, source, created_at, updated_at, related_to, "
-              "scope, review_status")
+              "scope, review_status, cat_block")
 
 
 def _fact(r) -> Dict:
     return {"id": r.id, "text": r.fact_text, "key": r.key_name, "is_current": r.is_current, "source": r.source,
-            "created_at": r.created_at, "updated_at": r.updated_at, "related_to": r.related_to}
+            "created_at": r.created_at, "updated_at": r.updated_at, "related_to": r.related_to, "block": r.cat_block}
 
 
 def list_facts(user_id: str, cat_id: int) -> List[Dict]:
@@ -165,6 +165,18 @@ def list_general_facts_for_sitter(user_id: str) -> List[Dict]:
             "AND is_current AND NOT is_archived AND fact_text <> '' AND review_status <> 'rejected' ORDER BY created_at, id"),
             {"cat": CATS_CATEGORY, "u": user_id}).all()
     return [_fact(r) for r in rows]
+
+
+def set_fact_block(user_id: str, memory_id: int, block: str) -> bool:
+    """Блок факта про котов (core.cat_blocks) руками владельца. Только факт владельца в категории «🐾 Коты», который привязан к коту или общий
+    (факт карточки человека сюда не относится: у него блок не ставится, он остаётся закрытым); архивные, стёртые и отклонённые не трогаем.
+    Возвращает False, если такого факта нет."""
+    with get_engine().begin() as c:
+        res = c.execute(text(
+            "UPDATE memories SET cat_block = :b, updated_at = now() WHERE id = :id AND user_id = :u AND category = :cat AND NOT is_archived "
+            "AND fact_text <> '' AND review_status <> 'rejected' AND (cat_id IS NOT NULL OR person_id IS NULL)"),
+            {"b": block, "id": memory_id, "u": user_id, "cat": CATS_CATEGORY})
+    return res.rowcount == 1
 
 
 def facts_count(user_id: str, cat_ids: List[int]) -> Dict[int, int]:

@@ -28,6 +28,8 @@ memories = Table(
     Column("person_id",      BigInteger),
     # Cat subject (миграция *_cats_subject): FK memories.cat_id → cats.id (ON DELETE SET NULL) — в миграции.
     Column("cat_id",         BigInteger),
+    # Блок факта про котов (миграция *_memories_cat_block): profile|care|health|relations|owner|unsorted; NULL = не поставлен = закрыто.
+    Column("cat_block",      Text),
     # pending | confirmed | rejected. Every read for context/search shows
     # only 'confirmed'; destructive paths see all.
     # цитата-основание автоизвлечённого факта (показывается при ревью); ADR-0027

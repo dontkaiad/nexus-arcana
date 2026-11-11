@@ -74,10 +74,11 @@ class MemoryRepo:
         source: str,
         user_id: str,
         cat_id: Optional[int] = None,
+        cat_block: Optional[str] = None,
     ) -> Optional[str]:
         """Lower-level add (used by save_memory directly)."""
         try:
-            return await self._pg.add(fact, key, category, scope, related_to, source, user_id, cat_id=cat_id)
+            return await self._pg.add(fact, key, category, scope, related_to, source, user_id, cat_id=cat_id, cat_block=cat_block)
         except Exception as e:
             logger.error("MemoryRepo.add: %s", e)
             return None
@@ -94,11 +95,12 @@ class MemoryRepo:
         person_id: Optional[int] = None,
         review_status: str = "confirmed",
         cat_id: Optional[int] = None,
+        cat_block: Optional[str] = None,
     ) -> Tuple[Optional[str], bool]:
         """Upsert (find by key+category → update; else create). Returns (id, was_updated)."""
         try:
             return await self._pg.upsert(fact, key, category, scope, related_to, source, user_id,
-                                         person_id=person_id, review_status=review_status, cat_id=cat_id)
+                                         person_id=person_id, review_status=review_status, cat_id=cat_id, cat_block=cat_block)
         except Exception as e:
             logger.error("MemoryRepo.upsert: %s", e)
             return None, False

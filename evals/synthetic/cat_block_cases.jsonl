@@ -1,0 +1,20 @@
+{"id": "profile-looks", "text": "Тучка рыжая, трёхлетняя, с белой грудкой", "expect": "profile", "model": "profile"}
+{"id": "profile-ears", "text": "у Пончика большие уши и короткий хвост", "expect": "profile", "model": "profile"}
+{"id": "profile-alias", "text": "Кекс ещё откликается на Кексик", "expect": "profile", "model": "profile"}
+{"id": "care-wet", "text": "Пончик не ест сухой корм, только влажный: половина пакетика утром", "expect": "care", "model": "care"}
+{"id": "care-litter", "text": "Тучка не ходит в грязный лоток — убирай каждый день", "expect": "care", "model": "care"}
+{"id": "care-things", "text": "Кекс роняет вещи со столов и полок, всё убирай заранее", "expect": "care", "model": "care"}
+{"id": "care-door", "text": "Пончик убегает в подъезд, дверь открывай осторожно", "expect": "care", "model": "care"}
+{"id": "care-generic", "text": "кот боится пылесоса", "expect": "care", "model": "care"}
+{"id": "health-meds", "text": "Кекс принимает таблетки от давления по утрам", "expect": "health", "model": "health"}
+{"id": "health-critical", "text": "Пончику нельзя курицу — аллергия", "expect": "health", "model": "health"}
+{"id": "health-symptom", "text": "у Тучки опять проблемы с мочеиспусканием, ждём анализы", "expect": "health"}
+{"id": "relations-fight", "text": "Кекс и Тучка дерутся, но через пять минут мирятся", "expect": "relations", "model": "relations"}
+{"id": "relations-bully", "text": "Пончик задирает Тучку, отвлекай его игрушкой", "expect": "relations", "model": "relations"}
+{"id": "relations-guests", "text": "Тучка боится гостей и прячется под диван", "expect": "relations", "model": "Relations"}
+{"id": "owner-money", "text": "ветеринар для Кекса обошёлся в 12 тысяч, надо отложить на следующий раз", "expect": "owner", "model": "owner"}
+{"id": "owner-plan", "text": "хочу взять ещё одну кошку после поездки", "expect": "owner", "model": "owner"}
+{"id": "owner-feelings", "text": "я переживаю за Пончика, пока меня не будет", "expect": "owner", "model": "owner"}
+{"id": "unsorted-vague", "text": "Тучка такая смешная", "expect": "unsorted", "model": "смешное"}
+{"id": "unsorted-trend", "text": "кошки вообще какие-то странные в этом месяце", "expect": "unsorted", "model": "unsorted"}
+{"id": "gate-off", "text": "royal canin indoor 2кг", "expect": "unsorted"}
