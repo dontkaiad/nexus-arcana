@@ -19,7 +19,7 @@ from a prompt-engineering standpoint.
 | Two-tier intent classification | `core/classifier.py`, `arcana/handlers/base.py` | Regex pre-filter → Haiku few-shot; verb tense = planned/done |
 | Layered context injection (RAG) | `arcana/handlers/sessions.py:1297-1301` | One system-prompt assembled from 4 sources on the fly |
 | Vector semantic recall | `core/rag.py`, `core/memory_rag.py` | Reading triplets **and** memory facts embedded into pgvector (Voyage), similarity search + Haiku rerank |
-| Hybrid memory search | `core/memory.py`, `core/memory_rag.py` | ILIKE-first (normalization + alias-resolution); Voyage + Haiku-rerank semantic fallback when <3 hits |
+| Hybrid memory search (historical scheme, see §5.2) | `core/memory.py`, `core/memory_rag.py` | ILIKE-first (normalization + alias-resolution); Voyage + Haiku-rerank semantic fallback when <3 hits |
 | Whitelist spell-correction guard | `core/preprocess.py` | Haiku typo-correction that does NOT touch the 78 Tarot cards + client names |
 | Constraint-based generation | `miniapp/backend/routes/today.py` | ADHD tip: ≤15 words, validator + retry + fallback, temperature=0.4 |
 | Vision parsers | `core/vision.py`, `arcana/handlers/sessions.py:450`, `arcana/handlers/clients.py` | Receipts, reading photos, profile screenshots → JSON |
@@ -196,6 +196,12 @@ Few-shot is the primary technique for structured parsers. Examples:
   identifier.
 
 ### 5.2 Hybrid memory search — ILIKE-first, semantic fallback
+
+> **Historical scheme.** This section records the earlier design: an ILIKE-first search
+> with a semantic fallback. Current retrieval is full-text search and vectors fused by
+> reciprocal-rank fusion, an optional Haiku rerank, and a question-understanding step before
+> the search (`core/memory_search.py`, `core/query_parse.py`; measured in
+> [EVALS.md](EVALS.md)). It stays here as the design record of that stage.
 - **`core/memory.py`**: `save_memory` / `parse_and_store` (the Message-free core,
   shared with the Mini App), `search_memory`, `get_memories_for_context`,
   `auto_suggest_memory`, `_semantic_search_memory`.

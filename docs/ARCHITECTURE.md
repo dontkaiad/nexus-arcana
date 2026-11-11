@@ -433,7 +433,8 @@ In order — because sequencing is part of the engineering:
   offline *reads* (service worker + PWA). Phase 3 — Arcana rituals/sessions offline
   (their write is text-plus-parse, not an append, and has no Mini App create endpoint
   yet). This is what "record a ritual in the forest where there's no signal" needs.
-- **heylark Booking** (backend in progress, [ADR-0026](CASES/0026-booking-architecture.md), epic #23) —
+- **heylark Booking** (built and live; further edits tracked in issues,
+  [ADR-0026](CASES/0026-booking-architecture.md), epic #23) —
   `booking.heylark.dev` where friends see busy/free and book meetings and esoteric clients
   book readings/rituals, visibility by role. Roles come from the shared heylark `grants`
   table (not `core_identity`), keyed on the sender's `tg_id`, never on Telegram-group
@@ -441,10 +442,14 @@ In order — because sequencing is part of the engineering:
   Apple is the target, reached via one outbound `.ics` subscription feed). Built: `core/booking/`
   (busy + slots engine), migration `d4e5f6a7b8c9` (`booking_*` + `works.scheduled_at`),
   `core/auth_grants.py`, `miniapp/backend/routes/booking.py` (`/api/booking/*` + `/feed/*.ics`,
-  `booking_principal` seam, owner CRUD). Pending: `⭐ Zarya` (`@heylark_booking_bot`, a
-  separate bot — the Nexus `WhitelistMiddleware` blocks non-owner messages, so a group-chat
-  concierge can't live inside Nexus), the web frontend, and linking a confirmed booking to a
-  Nexus task / 🔮 Work.
+  `booking_principal` seam, owner CRUD), the web front (`miniapp/backend/booking_web/`, three
+  faces by role) and the link from a confirmed booking to a Nexus task / 🔮 Work. `⭐ Zarya`
+  (`@heylark_booking_bot`, `zarya/`) runs as its own service in `docker-compose.yml` — a
+  separate bot, because the Nexus `WhitelistMiddleware` blocks non-owner messages, so a
+  group-chat concierge can't live inside Nexus. Status per ADR-0026: notifications to both
+  sides, reminders and cancellation are built; the admin config in the Mini App is
+  implemented and its follow-ups are open issues. The status above is as of 2026-11-11 (the
+  web front and the API answer on `booking.heylark.dev`).
 - **Apple-ecosystem integration** (planned, not built) — native reach into the
   macOS/iOS side I actually live in, so the assistant meets me where I work.
 

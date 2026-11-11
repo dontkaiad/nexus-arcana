@@ -136,15 +136,16 @@ location). `nexus/` and `arcana/` are domain packages that only talk to `core/`
 interfaces. The Mini App backend (`miniapp/backend/`) runs as a separate FastAPI
 process but shares the same Postgres and `core/` modules.
 
-**26 Architecture Decision Records** in [`docs/CASES/`](docs/CASES/) covering:
+**37 Architecture Decision Records** in [`docs/CASES/`](docs/CASES/) covering:
 RAG vector backend and right-sizing, voice authorship and RAG corpus gating,
 deterministic card parser, CI/CD forced-command deploy, single-writer location,
 Notion→PG migration strategy and execution, access model, and more. Each ADR states
 the rejected alternatives and the trade-offs — not just what was chosen.
 
-**11 domain specs** in [`docs/specs/`](docs/specs/) — Tasks, Finance, Sessions,
-Rituals, Clients, Memory, Lists, Grimoire, Works, Budget, Cushion — each pinned to a
-commit hash and updated in the same PR that changes the model.
+**14 domain specs** in [`docs/specs/`](docs/specs/) — Tasks, Finance, Sessions,
+Rituals, Clients, Memory, Lists, Grimoire, Works, Budget, Cushion, Booking, Care for
+sitter, Sitter lists — each pinned to a commit hash and updated in the same PR that
+changes the model.
 
 ```mermaid
 flowchart LR
@@ -202,6 +203,10 @@ a location change propagates to reminders, date parsing, and weather simultaneou
 - Semantic recall: past readings surface into current interpretation context
 - Mini App with session history, client cards, practice stats, and — read/write —
   works, grimoire, and memory (create from the app, not only the bot)
+
+**⭐ Zarya** — a third, separate bot (`@heylark_booking_bot`) that works with the
+`booking.heylark.dev` web calendar: friends and tarot clients see free slots and book,
+with visibility by role (guest / friend / admin).
 
 Both bots share the same `core/` layer: memory, payments, reminders, preprocessing
 (layout conversion EN→RU, spell correction), subtask handling, and message-to-record
