@@ -1,9 +1,10 @@
 # ☀️ Nexus & 🌒 Arcana
 
-> Two production Telegram bots + a Mini App. Not a tutorial project — I designed,
+> Three production Telegram bots + a Mini App. Not a tutorial project — I designed,
 > built, and use them every day as my personal assistant and practice CRM.
 > **☀️ Nexus** is my ADHD assistant: tasks, finances, budgets, reminders.
 > **🌒 Arcana** is the CRM for a small esoteric practice: clients, tarot sessions, rituals.
+> **⭐ Zarya** is the booking concierge for `booking.heylark.dev`: free slots and bookings.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
