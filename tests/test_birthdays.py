@@ -9,6 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from core import birthdays as bd
 
 TODAY = date(2026, 11, 11)
+
+
+def _arun(coro):
+    """Отдельный loop: asyncio.run() сбрасывает текущий loop в None и ломает соседние тесты с get_event_loop()."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 RECIPIENT = 111
 
 
@@ -64,7 +73,7 @@ def _run(people, existing_titles=(), recipient=RECIPIENT):
          patch("core.user_manager.get_user", AsyncMock(return_value={"user_id": "u1"})), \
          patch("core.repos.pg_people_repo.list_people", return_value=people), \
          patch("nexus.repos.tasks_repo._repo", tasks):
-        sent = asyncio.run(bd.send_birthday_pushes(bot, today=TODAY))
+        sent = _arun(bd.send_birthday_pushes(bot, today=TODAY))
     return sent, bot, create
 
 
@@ -102,6 +111,6 @@ def test_failure_for_one_person_does_not_block_others():
          patch("core.user_manager.get_user", AsyncMock(return_value={"user_id": "u1"})), \
          patch("core.repos.pg_people_repo.list_people", return_value=people), \
          patch("nexus.repos.tasks_repo._repo", tasks):
-        sent = asyncio.run(bd.send_birthday_pushes(bot, today=TODAY))
+        sent = _arun(bd.send_birthday_pushes(bot, today=TODAY))
     assert sent == 1
     assert bot.send_message.await_count == 2
