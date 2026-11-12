@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
+from miniapp.backend.mcp_read_auth import mcp_read_gate
 from miniapp.backend._helpers import (
     cat_from_notion,
     extract_time,
@@ -99,7 +100,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
     }
 
 
-@router.get("/tasks")
+@router.get("/tasks", dependencies=[Depends(mcp_read_gate)])
 async def get_tasks(
     tg_id: int = Depends(current_user_id),
     filter: str = Query("active", description="all|active|overdue|done"),
