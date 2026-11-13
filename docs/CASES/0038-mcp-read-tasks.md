@@ -1,10 +1,10 @@
-# ADR-0038 — Read-only service token for tasks (`GET /api/tasks`) for the personal MCP server
+# ADR-0038 — Read-only service token for tasks and practice reminders (`GET /api/tasks`, `GET /api/arcana/reminders`) for the personal MCP server
 
 - **Status:** Accepted (Nexus side); the consumer is `kai-mcp`, a separate private repository (see "Not covered")
 - **Date:** 2026-11-13
 - **Relates to:** ADR-0033 (the same pattern for cat cards), ADR-0012 (access model)
 - **Code conforms to:** `miniapp/backend/mcp_read_auth.py`, `miniapp/backend/auth.py` (`current_user_id`),
-  `miniapp/backend/routes/tasks.py`, `core/config.py`, `.env.example`, `tests/test_mcp_read_token.py`
+  `miniapp/backend/routes/tasks.py`, `miniapp/backend/routes/arcana_today.py` (`get_arcana_reminders`), `core/config.py`, `.env.example`, `tests/test_mcp_read_token.py`
 - Update this ADR in the same PR that changes who may read tasks or what they contain.
 
 ## Context
@@ -15,11 +15,11 @@ personal: free text (`title`, `note`) can name other people (a friend from a boo
 
 ## Decision
 
-A static bearer token, read-only, valid for exactly one route.
+A static bearer token, read-only, valid for exactly two routes.
 
 | Rule | Detail |
 |---|---|
-| Scope | Only `GET /api/tasks` (`filter` = active, overdue, today, done, all; `limit`). Every other route, every write, admin, finance, Arcana and cats stay closed. A test walks **all** routes of the app with a valid token and fails if anything but `GET /api/tasks` answers differently from a request without the header. |
+| Scope | Only `GET /api/tasks` (`filter` = active, overdue, today, done, all; `limit`) and `GET /api/arcana/reminders` (`days` 0..31, see below). Every other route, every write, admin, finance, Arcana and cats stay closed. A test walks **all** routes of the app with a valid token and fails if anything but these two GETs answers differently from a request without the header; a mutation check (the gate on a third route) makes it fail. |
 | Identity | The request runs as `MCP_READ_OWNER_TG_ID`, which must be in `ALLOWED_TELEGRAM_IDS`; the usual per-owner scoping then applies. |
 | Secret | `MCP_READ_TOKEN` from the server `.env` (at least 32 characters). Off when unset, short, equal to any other service token (cats read, sitter lists, care write, care period, cats write, booking), or the owner is not configured or not allowed: every bearer request is then 401. |
 | Comparison | `hmac.compare_digest` on bytes; an empty token never matches an empty setting. |
@@ -27,6 +27,23 @@ A static bearer token, read-only, valid for exactly one route.
 | Brute force | Failed bearer attempts are counted per client IP in the gate's **own** window (as for the other service gates): more than 10 in 60 s gives 429, including for the right token, until the window clears. Other schemes are not counted. |
 | Privacy | A request that came through the gate does not receive tasks of the categories "Практика" and "Расходники" (compared by name without the emoji). The filter runs before the status filters, sorting, `limit` and `total`, so the counts do not betray hidden tasks. Normal login is unchanged. |
 | Responses | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. The token is never logged; failures are logged with the IP only. |
+
+## `GET /api/arcana/reminders` (added 2026-11-13)
+
+Open works of the practice that ring today or in the next `days` days (0..31, default 7) by the owner's **local calendar**, plus the overdue ones.
+"Overdue" is the same rule as the works list in the Mini App (`/api/arcana/works`): the local **date** of the deadline is before today (a deadline
+this morning is not overdue until tomorrow). `done` and `archived` are never returned (the repo's `list_open`, one source for terminal statuses).
+The time of an item is the reminder, or the deadline when there is no reminder; works with neither are skipped. Sessions are not included
+(they hold a date without a time, a record of a past reading, not an appointment).
+
+| Rule | Detail |
+|---|---|
+| Shape | `{"days": N, "items": [...]}`; every item has **exactly five keys**: `at` (ISO time in the owner's zone), `kind` (always `work`), `category`, `priority`, `overdue`. No id, title, note, client, price. |
+| White lists | `category` outside the six work categories becomes "🗂️ Прочее"; `priority` outside "Срочно", "Важно", "Можно потом" becomes `null`. A foreign value never leaves as it is. |
+| Owner scoping | Without a `user_id` for the token's owner the answer is empty: `list_open("")` does **not** filter by owner and would return the works of every user. |
+| Privacy test | A work with a client, a title, a note, a price-like text and a foreign category is created in the test database; the raw body is searched for every one of those strings (client name, client contact, request and notes, title, note, price, category) and for the ids, and must contain none of them; the keys are checked against the five. |
+
+The works table has no price column (a price lives with sessions and finance), so a price never reaches this route by construction.
 
 ## Alternatives rejected
 
@@ -52,6 +69,5 @@ A static bearer token, read-only, valid for exactly one route.
 
 ## Not covered
 
-`GET /api/arcana/reminders` (reminders of the practice without client data) is a separate step and is not enabled.
-The consumer (`kai-mcp`: client, the cut-down task view without `note`, the `arcana_reminders` tool switched on only by `ARCANA_ENABLED=1`, rendering) lives in its own repository.
+The consumer (`kai-mcp`: client, the cut-down task view without `note`, the `arcana_reminders` tool switched on only by `ARCANA_ENABLED=1` and re-filtered by its own white list, rendering) lives in its own repository.
 Live verification against production is a post-deploy read-only smoke, not a CI test.
