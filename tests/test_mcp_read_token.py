@@ -19,15 +19,19 @@ from urllib.parse import urlencode
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from sqlalchemy import delete, insert, select
 
 from core.config import config
+from core.db import get_engine
 from miniapp.backend import (care_period_auth, care_write_auth, cats_read_auth, cats_write_auth, mcp_read_auth as gate,
                              sitter_lists_auth)
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 from miniapp.backend.routes import tasks as tasks_route
 from miniapp.backend.tg_auth import issue_session
-from nexus.repos.pg_tasks_repo import Task
+from nexus.repos import pg_tasks_repo
+from nexus.repos.pg_tasks_repo import PgTasksRepo, Task
+from nexus.repos.tasks_tables import task_category, task_status, tasks as tasks_table
 
 TOKEN = "test-only-mcp-token-" + "b2" * 10                      # вымышленный, 40 символов
 OWNER = 700000123                                               # вымышленный tg_id владельца токена
@@ -172,6 +176,106 @@ def test_other_scheme_is_not_counted_as_a_failed_bearer_attempt():
     for _ in range(30):                                                  # много «чужих» схем подряд
         c.get("/api/tasks", headers={"Authorization": "tma something", "X-Telegram-Init-Data": init_data(OTHER_OWNER)})
     assert c.get("/api/tasks", headers=OK).status_code == 200            # лимит не тронут: верный токен проходит
+
+
+# ── приватность: задачи практики не уходят в MCP (ADR-0038) ──────────────────
+
+HIDDEN_CATEGORIES = ["🔮 Практика", "🕯️ Расходники", "🕯 Расходники", "🔮 практика", "Расходники"]
+
+
+class MixedRepo:
+    """Видимые и скрытые задачи; скрытые стоят раньше по сроку, чтобы limit без фильтра их бы зацепил."""
+
+    def __init__(self) -> None:
+        self.rows = [Task(id=f"h{i}", title=f"СКРЫТО-{i}", status="Not started" if i % 2 else "Done", category=cat,
+                          deadline="2026-11-10T09:00:00+03:00", completed_at="2026-11-10T10:00:00+03:00" if i % 2 == 0 else "")
+                     for i, cat in enumerate(HIDDEN_CATEGORIES)]
+        self.rows += [Task(id="v1", title="Купить корм", status="Not started", category="🐾 Коты",
+                           deadline="2026-11-14T09:00:00+03:00"),
+                      Task(id="v2", title="Оплатить подписку", status="Not started", category="💻 Подписки",
+                           deadline="2026-11-15T09:00:00+03:00"),
+                      Task(id="v3", title="Сделано давно", status="Done", category="💳 Прочее",
+                           completed_at="2026-11-01T10:00:00+03:00")]
+
+    async def active(self, user_id: str):
+        return [t for t in self.rows if t.status != "Done"]
+
+    async def list_all(self, user_id: str):
+        return list(self.rows)
+
+
+@pytest.mark.parametrize("flt", ["active", "overdue", "today", "done", "all"])
+def test_practice_tasks_are_not_in_the_mcp_answer_nor_in_total(monkeypatch, flt):
+    monkeypatch.setattr(tasks_route, "_tasks_repo", MixedRepo())
+    r = api().get("/api/tasks", params={"filter": flt, "limit": 100}, headers=OK)
+    assert r.status_code == 200
+    body = r.json()
+    assert not [t for t in titles(r) if t.startswith("СКРЫТО")]
+    assert body["total"] == len(body["tasks"])                          # скрытые не входят и в total
+    assert all(t["cat"]["name"] not in ("Практика", "Расходники", "практика") for t in body["tasks"])
+
+
+def test_practice_filter_applies_before_limit_and_total(monkeypatch):
+    monkeypatch.setattr(tasks_route, "_tasks_repo", MixedRepo())
+    r = api().get("/api/tasks", params={"filter": "all", "limit": 1}, headers=OK)
+    assert titles(r) == ["Купить корм"]                                 # без фильтра первой была бы скрытая (срок раньше)
+    assert r.json()["total"] == 3                                       # Купить корм, Оплатить подписку, Сделано давно
+
+
+def test_without_bearer_normal_login_still_sees_everything(monkeypatch):
+    monkeypatch.setattr(tasks_route, "_tasks_repo", MixedRepo())
+    c = api()
+    r = c.get("/api/tasks", params={"filter": "all", "limit": 100}, headers={"X-Telegram-Init-Data": init_data(OTHER_OWNER)})
+    assert r.status_code == 200
+    assert len(titles(r)) == len(HIDDEN_CATEGORIES) + 3 and r.json()["total"] == len(HIDDEN_CATEGORIES) + 3
+    cookie, _ = issue_session(OTHER_OWNER, secret=SECRET, remember=False)
+    r = api().get("/api/tasks", params={"filter": "all", "limit": 100}, cookies={"hl_session": cookie})
+    assert len([t for t in titles(r) if t.startswith("СКРЫТО")]) == len(HIDDEN_CATEGORIES)
+    # другая схема Authorization с обычным входом тоже без фильтра
+    r = api().get("/api/tasks", params={"filter": "all"}, headers={"Authorization": "tma x",
+                                                                    "X-Telegram-Init-Data": init_data(OTHER_OWNER)})
+    assert len([t for t in titles(r) if t.startswith("СКРЫТО")]) == len(HIDDEN_CATEGORIES)
+
+
+@pytest.fixture
+def db_tasks(monkeypatch):
+    """Настоящие строки в базе: категории практики добавлены в справочник, задачи лежат в таблице tasks."""
+    mark = "test-mcp-read-token"
+    added = []
+    with get_engine().begin() as c:
+        have = {r[0] for r in c.execute(select(task_category.c.code))}
+        for code in ("🔮 Практика", "🕯️ Расходники"):
+            if code not in have:
+                c.execute(insert(task_category).values(code=code))
+                added.append(code)
+    for d in (pg_tasks_repo._status_id, pg_tasks_repo._status_code, pg_tasks_repo._category_id, pg_tasks_repo._category_code,
+              pg_tasks_repo._priority_id, pg_tasks_repo._priority_code, pg_tasks_repo._repeat_id, pg_tasks_repo._repeat_code,
+              pg_tasks_repo._dow_id, pg_tasks_repo._dow_code):
+        d.clear()                                                       # справочники перечитаются вместе с новыми строками
+    with get_engine().begin() as c:
+        sid = c.execute(select(task_status.c.id).where(task_status.c.code == "Not started")).scalar()
+        cats = {code: cid for cid, code in c.execute(select(task_category.c.id, task_category.c.code))}
+        for title, cat in (("Закупка свечей СКРЫТО", "🕯️ Расходники"), ("Подготовить ритуал СКРЫТО", "🔮 Практика"),
+                           ("Запись к врачу", "🏥 Здоровье"), ("Прочее дело", "💳 Прочее")):
+            c.execute(insert(tasks_table).values(title=title, status_id=sid, category_id=cats[cat], user_id=mark))
+    monkeypatch.setattr(tasks_route, "_tasks_repo", PgTasksRepo())
+    monkeypatch.setattr(tasks_route, "get_user_id", AsyncMock(return_value=mark))
+    yield mark
+    with get_engine().begin() as c:
+        c.execute(delete(tasks_table).where(tasks_table.c.user_id == mark))
+        if added:
+            c.execute(delete(task_category).where(task_category.c.code.in_(added)))
+    for d in (pg_tasks_repo._status_id, pg_tasks_repo._status_code, pg_tasks_repo._category_id, pg_tasks_repo._category_code):
+        d.clear()
+
+
+def test_practice_tasks_in_the_database_are_hidden_from_mcp_only(db_tasks):
+    r = api().get("/api/tasks", params={"filter": "all", "limit": 100}, headers=OK)
+    assert r.status_code == 200 and sorted(titles(r)) == ["Запись к врачу", "Прочее дело"] and r.json()["total"] == 2
+    r = api().get("/api/tasks", params={"filter": "active", "limit": 1}, headers=OK)
+    assert len(titles(r)) == 1 and "СКРЫТО" not in titles(r)[0] and r.json()["total"] == 2
+    r = api().get("/api/tasks", params={"filter": "all", "limit": 100}, headers={"X-Telegram-Init-Data": init_data(OTHER_OWNER)})
+    assert len(titles(r)) == 4 and r.json()["total"] == 4              # обычный вход видит всё, как раньше
 
 
 # ── выключено / неверно настроено ────────────────────────────────────────────

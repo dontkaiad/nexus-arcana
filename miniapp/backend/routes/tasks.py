@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from core.user_manager import get_user_id
 from miniapp.backend.auth import current_user_id
@@ -24,6 +25,15 @@ router = APIRouter()
 _tasks_repo = PgTasksRepo()
 
 ALLOWED_FILTERS = {"all", "active", "overdue", "done", "today"}
+
+# Чтение по Bearer-токену MCP (ADR-0038) не отдаёт задачи практики: «🔮 Практика» и «🕯️ Расходники». Сравниваем имя
+# без эмодзи (с селектором вариации или без него), чтобы вариант написания не обошёл фильтр.
+MCP_HIDDEN_CATEGORY_NAMES = {"практика", "расходники"}
+
+
+def hidden_from_mcp(category: str) -> bool:
+    name = re.sub(r"[\ufe0f\u200d]", "", cat_from_notion(category)["name"]).strip().lower()
+    return name in MCP_HIDDEN_CATEGORY_NAMES
 
 _PRIO_WEIGHT = {"🔴": 0, "🟡": 1, "⚪": 2}
 
@@ -102,6 +112,7 @@ def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
 
 @router.get("/tasks", dependencies=[Depends(mcp_read_gate)])
 async def get_tasks(
+    request: Request,
     tg_id: int = Depends(current_user_id),
     filter: str = Query("active", description="all|active|overdue|done"),
     limit: int = Query(100, ge=1, le=500),
@@ -117,6 +128,10 @@ async def get_tasks(
         raw = await _tasks_repo.list_all(user_id)
     else:
         raw = await _tasks_repo.active(user_id)
+
+    if getattr(request.state, "mcp_read_owner", None):
+        # запрос пришёл через MCP-шлюз: задачи практики отсеиваем ДО фильтров, сортировки, limit и total
+        raw = [t for t in raw if not hidden_from_mcp(t.category)]
 
     items = [_serialize_pg_task(t, today_date, tz_offset) for t in raw]
 
