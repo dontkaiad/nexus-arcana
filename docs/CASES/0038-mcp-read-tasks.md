@@ -1,0 +1,51 @@
+# ADR-0038 — Read-only service token for tasks (`GET /api/tasks`) for the personal MCP server
+
+- **Status:** Accepted (Nexus side); the consumer is `kai-mcp`, a separate private repository (see "Not covered")
+- **Date:** 2026-11-13
+- **Relates to:** ADR-0033 (the same pattern for cat cards), ADR-0012 (access model)
+- **Code conforms to:** `miniapp/backend/mcp_read_auth.py`, `miniapp/backend/auth.py` (`current_user_id`),
+  `miniapp/backend/routes/tasks.py`, `core/config.py`, `.env.example`, `tests/test_mcp_read_token.py`
+- Update this ADR in the same PR that changes who may read tasks or what they contain.
+
+## Context
+
+`kai-mcp` (an MCP server for claude.ai, running as another container on the same Docker network) must show the owner
+her open tasks. It has no Telegram `initData` and no browser cookie, so it cannot use the Mini App login. Tasks are
+personal: free text (`title`, `note`) can name other people (a friend from a booking, a birthday, a cat).
+
+## Decision
+
+A static bearer token, read-only, valid for exactly one route.
+
+| Rule | Detail |
+|---|---|
+| Scope | Only `GET /api/tasks` (`filter` = active, overdue, today, done, all; `limit`). Every other route, every write, admin, finance, Arcana and cats stay closed. A test walks **all** routes of the app with a valid token and fails if anything but `GET /api/tasks` answers differently from a request without the header. |
+| Identity | The request runs as `MCP_READ_OWNER_TG_ID`, which must be in `ALLOWED_TELEGRAM_IDS`; the usual per-owner scoping then applies. |
+| Secret | `MCP_READ_TOKEN` from the server `.env` (at least 32 characters). Off when unset, short, equal to any other service token (cats read, sitter lists, care write, care period, cats write, booking), or the owner is not configured or not allowed: every bearer request is then 401. |
+| Comparison | `hmac.compare_digest` on bytes; an empty token never matches an empty setting. |
+| Bearer only | If `Authorization` has the **Bearer** scheme it must be valid, otherwise 401. **Any other scheme** (for example `tma <initData>`) is not ours: the gate does nothing and the normal login (`initData`, `hl_session`) decides. This differs on purpose from ADR-0033, where any scheme except Bearer is 401. Without the header nothing changes. |
+| Brute force | Failed bearer attempts are counted per client IP in the gate's **own** window (as for the other service gates): more than 10 in 60 s gives 429, including for the right token, until the window clears. Other schemes are not counted. |
+| Privacy | A request that came through the gate does not receive tasks of the categories "Практика" and "Расходники" (compared by name without the emoji). The filter runs before the status filters, sorting, `limit` and `total`, so the counts do not betray hidden tasks. Normal login is unchanged. |
+| Responses | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. The token is never logged; failures are logged with the IP only. |
+
+## Alternatives rejected
+
+- **Reuse the cats token or the owner's session:** one leaked secret would open several things; a container cannot produce `initData`.
+- **A dedicated `/api/mcp/tasks` router:** duplicates the response shape and the owner scoping; the gate on the existing GET plus a test that pins the scope is smaller.
+- **Share one limiter between all service gates:** a noisy client of one gate could lock out another; the repo keeps one window per gate.
+- **Fail with 401 on any non-Bearer scheme (as ADR-0033 does):** a proxy or client that sends another scheme for its own reasons would lose normal login on `/api/tasks`.
+
+## Consequences
+
+- No schema change, no migration. Rollback: empty `MCP_READ_TOKEN` in `.env` and recreate `nexus-bot` (bearer requests become 401, Mini App users are unaffected); `kai-mcp` without `NEXUS_MCP_TOKEN` serves only job-hunter.
+- Enabling is an `.env` edit on the server followed by a recreate of `nexus-bot`; the same token goes to `kai-mcp` as `NEXUS_MCP_TOKEN`. Rotation: change both, recreate both.
+- The token holder reads every task of the owner except the hidden categories. That is the intent.
+- The public proxy also serves this route: a leaked token works from outside until rotated (256 bits, read-only, rate-limited).
+- The category filter is a guard, not proof of privacy: today these two names are finance and list categories and are not stored for tasks (`task_category` has no such row, a task saved with such a category falls back to "Прочее"). Private names in a free-text `title` or `note` are **not** filtered.
+- A shared in-memory limiter is per process; a second replica would count separately (single container today).
+
+## Not covered
+
+`GET /api/arcana/reminders` (reminders of the practice without client data) is a separate step and is not enabled.
+The consumer (`kai-mcp`: client, the cut-down task view, rendering) lives in its own repository.
+Live verification against production is a post-deploy read-only smoke, not a CI test.

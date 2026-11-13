@@ -9,6 +9,7 @@ Lists vN.x, Memory vN.x).
 ## [Unreleased]
 
 ### Added
+- 🔌 MCP: `GET /api/tasks` читается по Bearer-токену `MCP_READ_TOKEN` для своего MCP-сервера (kai-mcp); шлюз висит только на этом маршруте, чужая схема Authorization идёт обычным входом, задачи «Практика» и «Расходники» не отдаются, ADR-0038 (`docs/CASES/0038-mcp-read-tasks.md`).
 - 🐾 Коты: владелец размечает «Неразобранное» из приложения cats: `GET /api/cat-health/facts/unsorted` и `PATCH /api/cat-health/facts/{id}/block` под токеном здоровья (токен владельца).
 - 🐾 Коты: ситтер видит факты только открытых блоков (cat-care, /ask, читающий токен `/api/cats`); `blocks` в cat-care; закрыта дыра: /ask отдавал факты карточки «Я» про котов; лимиты 600 знаков / 40 общих фактов.
 - 🐾 Коты: блок факта (profile | care | health | relations | owner | unsorted) определяет, кто его видит; ставится в том же вызове Haiku, NULL = закрыто, владелец размечает `PATCH /api/cats/facts/{id}/block`; миграция `d3f5a7c9e124`; кейс 0037, эвал `cat_block_eval`.
