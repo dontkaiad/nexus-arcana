@@ -26,6 +26,7 @@ from core.bot_notify import notify_user
 
 from miniapp.backend._moon import moon_phase, next_phases
 from miniapp.backend.auth import current_user_id
+from miniapp.backend.mcp_read_auth import mcp_read_gate
 from miniapp.backend._helpers import (
     cat_from_notion,
     date_start,
@@ -974,3 +975,52 @@ async def post_arcana_accuracy_verify(
         "pending_sessions_count": pending_sessions,
         "pending_rituals_count": pending_rituals,
     }
+
+
+# ── GET /api/arcana/reminders — для MCP-сервера (ADR-0038) ───────────────────
+# Ответ БЕЗ данных клиентов: на каждую работу ровно пять ключей (at, kind, category, priority, overdue). Нет id,
+# заголовка, заметки, клиента, цены. Значения категории и приоритета берутся из белых списков: чужое значение
+# (старая запись, ручная правка) превращается в «🗂️ Прочее» / null, а не уходит наружу как есть.
+_MCP_REMINDER_CATEGORIES = {"🃏 Расклад", "✨ Ритуал", "📱 Соцсети", "🛒 Расходники", "📚 Обучение", "🗂️ Прочее"}
+_MCP_REMINDER_FALLBACK_CATEGORY = "🗂️ Прочее"
+_MCP_REMINDER_PRIORITIES = {"Срочно", "Важно", "Можно потом"}
+
+
+@router.get("/arcana/reminders", dependencies=[Depends(mcp_read_gate)])
+async def get_arcana_reminders(
+    tg_id: int = Depends(current_user_id),
+    days: int = Query(7, ge=0, le=31),
+) -> dict[str, Any]:
+    """Открытые работы практики, у которых напоминание (или, если его нет, дедлайн) падает на сегодня или на ближайшие
+    `days` дней по ЛОКАЛЬНОМУ календарю владельца, плюс просроченные (дедлайн раньше сегодняшней даты: так же, как
+    «просрочено» в /api/arcana/works). done и archived не берутся. Работы без напоминания и без дедлайна пропускаются."""
+    user_id = await get_user_id(tg_id)
+    if not user_id:
+        # list_open("") не фильтрует по владельцу и отдал бы работы всех пользователей: без user_id отдаём пусто
+        return {"days": days, "items": []}
+    today_date, tz_offset = await today_user_tz(tg_id)
+    tz = timezone(timedelta(hours=tz_offset))
+    horizon = today_date + timedelta(days=days)
+
+    items: list[dict] = []
+    for w in await _pg_works_repo.list_open(user_id):
+        at = w.reminder_dt or w.deadline_dt
+        if at is None:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        deadline_date = _work_local_date(w.deadline_dt, tz_offset)
+        overdue = bool(deadline_date and deadline_date < today_date)
+        at_date = _work_local_date(at, tz_offset)
+        if not (overdue or (at_date is not None and today_date <= at_date <= horizon)):
+            continue
+        items.append({
+            "at": at.astimezone(tz).isoformat(),
+            "kind": "work",
+            "category": w.category if w.category in _MCP_REMINDER_CATEGORIES else _MCP_REMINDER_FALLBACK_CATEGORY,
+            "priority": w.priority if w.priority in _MCP_REMINDER_PRIORITIES else None,
+            "overdue": overdue,
+        })
+
+    items.sort(key=lambda x: x["at"])
+    return {"days": days, "items": items}

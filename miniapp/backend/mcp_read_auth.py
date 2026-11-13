@@ -1,7 +1,8 @@
-"""miniapp/backend/mcp_read_auth.py — чтение задач для своего MCP-сервера kai-mcp (по образцу ADR-0033).
+"""miniapp/backend/mcp_read_auth.py — чтение для своего MCP-сервера kai-mcp (по образцу ADR-0033, ADR-0038).
 
-kai-mcp ходит в `GET /api/tasks` с `Authorization: Bearer <MCP_READ_TOKEN>`. Шлюз `mcp_read_gate` подключён ТОЛЬКО к
-этому маршруту (запись, admin, финансы, Arcana, коты по этому токену не открываются: тест обходит все маршруты):
+kai-mcp ходит в `GET /api/tasks` и `GET /api/arcana/reminders` с `Authorization: Bearer <MCP_READ_TOKEN>`. Шлюз
+`mcp_read_gate` подключён ТОЛЬКО к этим двум маршрутам (запись, admin, финансы, клиенты, коты по этому токену не
+открываются: тест обходит все маршруты):
   • заголовка Authorization нет → ничего не делает, дальше обычный вход (initData / cookie hl_session);
   • схема заголовка НЕ Bearer (например `tma <initData>`) → тоже ничего не делает: это не наш токен, запрос идёт
     обычным входом, а не получает 401 (отличие от cats_read_gate, где любая схема кроме Bearer даёт 401);
