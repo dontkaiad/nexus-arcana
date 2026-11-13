@@ -25,7 +25,7 @@ from sqlalchemy import delete, insert, select
 from core.config import config
 from core.db import get_engine
 from miniapp.backend import (care_period_auth, care_write_auth, cats_read_auth, cats_write_auth, mcp_read_auth as gate,
-                             sitter_lists_auth)
+                             mcp_write_auth, sitter_lists_auth)
 from miniapp.backend.app import app
 from miniapp.backend.auth import current_user_id
 from miniapp.backend.routes import arcana_today as arcana_route
@@ -71,7 +71,7 @@ def env(monkeypatch):
     monkeypatch.setattr(config, "mcp_read_owner_tg_id", OWNER)
     monkeypatch.setattr(config, "allowed_ids", [OWNER, OTHER_OWNER])
     monkeypatch.setattr(config, "session_secret", SECRET)
-    for mod in (gate, cats_read_auth, sitter_lists_auth, care_write_auth, care_period_auth, cats_write_auth):
+    for mod in (gate, mcp_write_auth, cats_read_auth, sitter_lists_auth, care_write_auth, care_period_auth, cats_write_auth):
         monkeypatch.setattr(mod, "_limiter", cats_read_auth.FailureLimiter())   # состояние лимитов не течёт между тестами
     repo = FakeTasksRepo()
     seen: dict = {"tg_ids": []}
