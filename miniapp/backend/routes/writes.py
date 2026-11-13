@@ -381,20 +381,31 @@ async def task_edit(
         # редактирования эту "5 утра" не показывала и не давала поправить
         # (deadline_time вообще не было в контракте). Теперь: явное время
         # (deadline_time) → старое время текущего дедлайна (сохраняем,
-        # если юзер поменял только дату) → 09:00 по умолчанию — и всегда
+        # если юзер поменял только дату; all-day остаётся all-day) → 09:00 по умолчанию — и всегда
         # с явным offset'ом, чтобы _parse_iso не гадал.
         deadline_hhmm = body.deadline_time
-        if not deadline_hhmm and task.deadline:
-            deadline_hhmm = extract_time(task.deadline, tz_offset, bool(getattr(task, "deadline_all_day", False)))
-        deadline_hhmm = deadline_hhmm or "09:00"
-        try:
-            dl_h, dl_m = deadline_hhmm.split(":")
-            dl_tz = timezone(timedelta(hours=tz_offset))
-            dl_dt = datetime(new_date.year, new_date.month, new_date.day,
-                              int(dl_h), int(dl_m), tzinfo=dl_tz)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="invalid deadline_time, expected HH:MM")
-        props["Дедлайн"] = _date(dl_dt.isoformat())
+        keep_all_day = (
+            not deadline_hhmm
+            and bool(task.deadline)
+            and bool(getattr(task, "deadline_all_day", False))
+        )
+        if keep_all_day:
+            # Дедлайн «на весь день» и время не указано явно → остаётся
+            # all-day: голая дата без времени (PgTasksRepo ставит флаг по
+            # отсутствию «T»). Время подставляем только по явному запросу.
+            props["Дедлайн"] = _date(new_date.isoformat())
+        else:
+            if not deadline_hhmm and task.deadline:
+                deadline_hhmm = extract_time(task.deadline, tz_offset, False)
+            deadline_hhmm = deadline_hhmm or "09:00"
+            try:
+                dl_h, dl_m = deadline_hhmm.split(":")
+                dl_tz = timezone(timedelta(hours=tz_offset))
+                dl_dt = datetime(new_date.year, new_date.month, new_date.day,
+                                  int(dl_h), int(dl_m), tzinfo=dl_tz)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="invalid deadline_time, expected HH:MM")
+            props["Дедлайн"] = _date(dl_dt.isoformat())
 
     # Напоминание редактируется независимо от дедлайна: дата берётся из
     # reminder_date, при его отсутствии — из дедлайна (обратная совместимость
