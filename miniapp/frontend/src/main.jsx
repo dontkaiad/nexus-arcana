@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 if (typeof window !== 'undefined' && window.Telegram?.WebApp?.ready) {
   try { window.Telegram.WebApp.ready() } catch { /* noop */ }
@@ -8,6 +9,8 @@ if (typeof window !== 'undefined' && window.Telegram?.WebApp?.ready) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary label="root">
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 )

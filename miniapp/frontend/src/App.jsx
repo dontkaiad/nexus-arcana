@@ -15,6 +15,7 @@ import {
 } from "./adapters";
 import { apiGet, apiPost, apiDelete, apiPatch, apiStream, flushOfflineQueue, outboxCount } from "./api";
 import { SelfListCard, SelfDetailHeader } from "./components/self/SelfClientCard.jsx";
+import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import PeopleTab from "./people/PeopleTab.jsx";
 import PersonCard from "./people/PersonCard.jsx";
 import CatsTab from "./cats/CatsTab.jsx";
@@ -624,7 +625,7 @@ const Sheet = ({ s, open, onClose, title, children }) => {
             </span>
           </div>
         )}
-        {children}
+        <ErrorBoundary label="sheet" inline onBack={onClose}>{children}</ErrorBoundary>
       </div>
     </div>
   );
@@ -7186,12 +7187,14 @@ function ClientDetail({ s, id, onOpenPerson }) {
       <LinkBar s={s} Sheet={Sheet} client={c} onChanged={refetch} onOpenPerson={onOpenPerson} />
 
       {editOpen && (
-        <ClientEditForm
-          s={s}
-          client={c}
-          isSelf={isSelf}
-          onSaved={() => { setEditOpen(false); refetch(); }}
-        />
+        <ErrorBoundary label="client-edit" inline onBack={() => setEditOpen(false)}>
+          <ClientEditForm
+            s={s}
+            client={c}
+            isSelf={isSelf}
+            onSaved={() => { setEditOpen(false); refetch(); }}
+          />
+        </ErrorBoundary>
       )}
 
       {isSelf ? (
@@ -7576,12 +7579,14 @@ function TaskSheet({ s, task, onClose, onClosed }) {
         </div>
         {editOpen && (
           <div style={{ marginTop: 8 }}>
-            <TaskEditForm
-              s={s}
-              task={task}
-              busy={busy === "edit"}
-              onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
-            />
+            <ErrorBoundary label="task-edit" inline onBack={() => setEditOpen(false)}>
+              <TaskEditForm
+                s={s}
+                task={task}
+                busy={busy === "edit"}
+                onSave={(payload) => run("edit", () => apiPost(`/api/tasks/${task.id}/edit`, payload))}
+              />
+            </ErrorBoundary>
           </div>
         )}
       </div>
@@ -8190,16 +8195,6 @@ function TaskForm({ s, onSubmit, busy }) {
   const [reminderKey, setReminderKey] = useState("30");
   const [reminderCustom, setReminderCustom] = useState("");
   const [cats, setCats] = useState([]);
-  // «Для ситтера»: задача входит в расписание ситтера (ставится сразу, при ошибке откатывается).
-  const [forSitter, setForSitter] = useState(!!task?.forSitter);
-  const [sitterErr, setSitterErr] = useState("");
-  const toggleSitter = async (next) => {
-    if (busy) return;
-    setForSitter(next); setSitterErr("");
-    try { await apiPost(`/api/tasks/${task.id}/sitter`, { for_sitter: next }); }
-    catch (e) { setForSitter(!next); setSitterErr(e.message || "не получилось"); }
-  };
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -8303,6 +8298,15 @@ function TaskEditForm({ s, task, busy, onSave }) {
     task?.duration_min != null ? String(task.duration_min) : ""
   );
   const [cats, setCats] = useState([]);
+  // «Для ситтера»: задача входит в расписание ситтера (ставится сразу, при ошибке откатывается).
+  const [forSitter, setForSitter] = useState(!!task?.forSitter);
+  const [sitterErr, setSitterErr] = useState("");
+  const toggleSitter = async (next) => {
+    if (busy) return;
+    setForSitter(next); setSitterErr("");
+    try { await apiPost(`/api/tasks/${task.id}/sitter`, { for_sitter: next }); }
+    catch (e) { setForSitter(!next); setSitterErr(e.message || "не получилось"); }
+  };
 
   useEffect(() => {
     let cancelled = false;
