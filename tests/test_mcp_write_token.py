@@ -442,7 +442,7 @@ def test_reschedule_moves_only_the_deadline_and_the_reminder(env):
 def test_reschedule_answer_has_old_and_new_values():
     tid = timed_task()
     body = resched(tid, {"deadline_date": day(5), "deadline_time": "16:30", "reminder": when(5, 15, 0)}).json()
-    assert set(body) == {"id", "title", "old", "new"} and body["id"] == tid and body["title"] == "Позвонить маме"
+    assert set(body) == {"id", "title", "old", "new", "conflicts"} and body["id"] == tid and body["title"] == "Позвонить маме"
     assert body["old"] == {"deadline": day(2), "deadline_time": "15:00", "reminder": when(2, 14, 0)}
     assert body["new"] == {"deadline": day(5), "deadline_time": "16:30", "reminder": when(5, 15, 0)}
 
@@ -591,7 +591,7 @@ def test_reschedule_limit_30_per_day_and_refusals_do_not_count(monkeypatch):
 def test_create_answer_has_only_the_expected_fields_and_no_secrets():
     r = create({"title": "Лишнего нет", "reminder": when(3, 9, 0), "deadline_time": "10:00"})
     body = r.json()
-    assert set(body) == {"id", "title", "deadline", "deadline_time", "reminder", "prio", "category"}
+    assert set(body) == {"id", "title", "deadline", "deadline_time", "reminder", "prio", "category", "conflicts"} and body["conflicts"] == []
     blob = r.text
     for secret in (TOKEN_W, TOKEN_R, MARK, str(OWNER), "user_id", "for_sitter", "note"):
         assert secret not in blob, secret
