@@ -273,6 +273,37 @@ class PgWorksRepo:
             ).fetchone()
         return str(row[0]) if row else None
 
+    def _create_personal_sync(
+        self,
+        title: str,
+        priority: str,
+        deadline: Optional[datetime],
+        category: str,
+        user_id: str,
+        tz_offset: int,
+    ) -> Optional[str]:
+        """Личная практика БЕЗ клиента (ADR-0040, MCP). Набор колонок зафиксирован здесь: client_id, notes, repeat*, reminder,
+        scheduled_at (кроме слота ритуала/расклада с явным временем, как в _create_sync) и duration_min в INSERT не попадают
+        иначе, чем через _slot_fields. Параметра клиента у метода нет, поэтому привязать запись к клиенту через него нельзя.
+        Пустой user_id не пишем: работа без владельца видна всем в busy-калькуляторе Зари."""
+        if not user_id:
+            return None
+        pcode = _code_for(_PRIORITY_TO_CODE, priority) or "later"
+        slot = _slot_fields(category, deadline, tz_offset)
+        with get_engine().begin() as conn:
+            values = {
+                "title": title,
+                "deadline": deadline,
+                "category": category,
+                "priority_id": _resolve(conn, work_priority, pcode),
+                "status_id": _resolve(conn, work_status, "open"),
+                "user_id": user_id,
+            }
+            if slot:
+                values["scheduled_at"], values["duration_min"] = slot
+            row = conn.execute(works.insert().values(**values).returning(works.c.id)).fetchone()
+        return str(row[0]) if row else None
+
     def _set_repeat_fields_sync(
         self,
         work_id: str,
@@ -548,6 +579,20 @@ class PgWorksRepo:
             self._create_sync,
             title, priority, deadline, category, client_id, user_id,
             repeat, repeat_time, day_of_week, notes, tz_offset,
+        )
+
+    async def create_personal(
+        self,
+        title: str,
+        priority: str,
+        deadline: Optional[datetime],
+        category: str,
+        user_id: str,
+        tz_offset: int,
+    ) -> Optional[str]:
+        """Только личная практика: у метода нет параметра клиента (ADR-0040)."""
+        return await asyncio.to_thread(
+            self._create_personal_sync, title, priority, deadline, category, user_id, tz_offset,
         )
 
     async def mark_done(self, work_id: str) -> bool:

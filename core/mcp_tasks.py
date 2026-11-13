@@ -45,12 +45,12 @@ class McpTaskError(Exception):
 
 # ── поля ─────────────────────────────────────────────────────────────────────
 
-def clean_title(raw: str) -> str:
+def clean_title(raw: str, max_len: int = TITLE_MAX) -> str:
     """1..200 символов после обрезки пробелов. Без управляющих символов и без < >: заголовок уходит в Telegram-сообщения
     с parse_mode=HTML (напоминание, дедлайн-пинг), а текст пришёл от модели: чужая разметка и ссылки там не нужны."""
     title = (raw or "").strip()
-    if not 1 <= len(title) <= TITLE_MAX:
-        raise McpTaskError(422, "bad_title", f"title must be 1..{TITLE_MAX} characters")
+    if not 1 <= len(title) <= max_len:
+        raise McpTaskError(422, "bad_title", f"title must be 1..{max_len} characters")
     if _CTRL_RE.search(title):
         raise McpTaskError(422, "bad_title", "title must not contain control characters or line breaks")
     if "<" in title or ">" in title:

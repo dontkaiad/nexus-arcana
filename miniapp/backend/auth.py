@@ -89,12 +89,13 @@ async def current_user_id(
     """FastAPI dependency: validate tg_id from X-Telegram-Init-Data header or hl_session cookie.
 
     Служебный доступ: только если шлюз `cats_read_gate` (подключён лишь к двум GET /api/cats) или `mcp_read_gate`
-    (подключён лишь к двум GET) или `mcp_write_gate` (лишь к двум POST /api/mcp/tasks…) уже проверил Bearer-токен, он кладёт владельца в request.state.
+    (подключён лишь к двум GET) или `mcp_write_gate` (лишь к двум POST /api/mcp/tasks…) или `mcp_practice_gate` (лишь к POST /api/mcp/practice) уже проверил Bearer-токен, он кладёт владельца в request.state.
     Больше нигде эти поля не выставляются."""
     if request is not None:
         owner = (getattr(request.state, "cats_read_owner", None)
                  or getattr(request.state, "mcp_read_owner", None)
-                 or getattr(request.state, "mcp_write_owner", None))
+                 or getattr(request.state, "mcp_write_owner", None)
+                 or getattr(request.state, "mcp_practice_owner", None))
         if owner:
             return int(owner)
     if x_telegram_init_data:

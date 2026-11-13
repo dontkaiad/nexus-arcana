@@ -34,6 +34,7 @@ def _enabled() -> bool:
                 config.cats_read_token or "", config.sitter_lists_token or "", config.care_write_token or "",
                 config.care_period_token or "", config.cats_write_token or "", config.booking_service_token or "",
                 config.mcp_write_token or "",          # токен чтения не равен токену записи (ADR-0039)
+                config.mcp_practice_token or "",       # и токену создания практики (ADR-0040)
             }
             and bool(config.mcp_read_owner_tg_id)
             and config.mcp_read_owner_tg_id in config.allowed_ids)

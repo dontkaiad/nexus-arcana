@@ -176,6 +176,10 @@ class AppConfig:
     # ни одному другому служебному токену, включая MCP_READ_TOKEN. Владелец обязан быть в ALLOWED_TELEGRAM_IDS.
     mcp_write_token: str = ""
     mcp_write_owner_tg_id: int = 0
+    # Создание личной практики из MCP (ADR-0040): ОТДЕЛЬНЫЙ токен, только POST /api/mcp/practice. Не равен ни одному другому
+    # служебному токену, включая MCP_READ_TOKEN и MCP_WRITE_TOKEN. Владелец обязан быть в ALLOWED_TELEGRAM_IDS.
+    mcp_practice_token: str = ""
+    mcp_practice_owner_tg_id: int = 0
     log_thread_kaimcp: str = ""            # топик лог-группы для действий Claude (создал / перенёс задачу); пусто → топик Nexus
     # Пуши «у кого сегодня ДР» (core.birthdays): ОДИН получатель — личный tg_id Кай, без fan-out. Пусто → пуши выключены.
     birthday_push_tg_id: int = 0
@@ -216,6 +220,8 @@ def load_config() -> AppConfig:
         mcp_read_owner_tg_id = _int_or_zero(_optional("MCP_READ_OWNER_TG_ID")),
         mcp_write_token      = _optional("MCP_WRITE_TOKEN").strip(),
         mcp_write_owner_tg_id = _int_or_zero(_optional("MCP_WRITE_OWNER_TG_ID")),
+        mcp_practice_token   = _optional("MCP_PRACTICE_TOKEN").strip(),
+        mcp_practice_owner_tg_id = _int_or_zero(_optional("MCP_PRACTICE_OWNER_TG_ID")),
         log_thread_kaimcp    = _optional("TG_LOG_THREAD_KAIMCP"),
         care_period_owner_tg_id = _int_or_zero(_optional("CARE_PERIOD_OWNER_TG_ID")),
         birthday_push_tg_id  = _int_or_zero(_optional("BIRTHDAY_PUSH_TG_ID")),
