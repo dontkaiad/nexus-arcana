@@ -47,6 +47,7 @@ SECRET = "test-session-secret-for-mcp-practice-tests"
 CATEGORIES = ["🃏 Расклад", "✨ Ритуал", "📱 Соцсети", "🛒 Расходники", "📚 Обучение", "🗂️ Прочее"]
 SLOT_CATEGORIES = {"🃏 Расклад", "✨ Ритуал"}
 BOOKING_PREFIX = "practice-test-"
+PROBE_TITLE = "mcp-practice-empty-owner-probe"        # уникальное название: чистка не заденет настоящие работы
 CLIENTS = [("Мария Петрова", "paid"), ("Олег", "free"), ("Игорь", "paid"), ("Вера", "paid"), ("Ян", "paid"), ("Тестовая Кай", "self")]
 
 
@@ -114,6 +115,7 @@ def env(monkeypatch):
 def _cleanup():
     with get_engine().begin() as c:
         c.execute(delete(works_table).where(works_table.c.user_id.in_([MARK, OTHER_MARK])))
+        c.execute(delete(works_table).where(works_table.c.user_id == "").where(works_table.c.title == PROBE_TITLE))
         c.execute(delete(booking).where(booking.c.token.like(BOOKING_PREFIX + "%")))
 
 
@@ -236,12 +238,17 @@ def test_read_and_write_tokens_do_not_open_practice_and_practice_opens_neither_o
     assert api().post("/api/mcp/tasks/1/reschedule", json={"deadline_date": day(2)}, headers=P).status_code == 401
 
 
-def test_the_read_and_write_gates_are_off_if_their_token_equals_the_practice_token(monkeypatch):
-    monkeypatch.setattr(config, "mcp_read_token", TOKEN_P)
-    monkeypatch.setattr(config, "mcp_write_token", TOKEN_P)
+def test_the_read_gate_is_off_if_its_token_equals_the_practice_token(monkeypatch):
+    monkeypatch.setattr(config, "mcp_read_token", TOKEN_P)                          # только токен чтения совпал: исключение практики в шлюзе чтения
     assert api().get("/api/tasks", headers=P).status_code == 401
-    assert api().post("/api/mcp/tasks", json={"title": "x", "deadline_date": day(2)}, headers=P).status_code == 401
+    assert api().get("/api/arcana/reminders", headers=P).status_code == 401
     assert create(headers=P).status_code == 401                                    # и сама практика выключена
+
+
+def test_the_write_gate_is_off_if_its_token_equals_the_practice_token(monkeypatch):
+    monkeypatch.setattr(config, "mcp_write_token", TOKEN_P)                         # только токен записи совпал: исключение практики в шлюзе записи
+    assert api().post("/api/mcp/tasks", json={"title": "x", "deadline_date": day(2)}, headers=P).status_code == 401
+    assert create(headers=P).status_code == 401
 
 
 # ══ создание: что пишется ════════════════════════════════════════════════════
@@ -365,13 +372,16 @@ def test_a_practice_nobody_owns_is_not_created(monkeypatch):
     async def none(tg_id):
         return ""
     monkeypatch.setattr(route, "get_user_id", none)
+    empty_before = len(rows(""))                                                    # в базе могут быть старые работы без владельца: считаем разницу
     r = create()
     assert r.status_code == 409 and r.json()["detail"]["code"] == "owner_unknown"
-    assert rows() == [] and rows("") == []
+    assert rows() == [] and len(rows("")) == empty_before
 
 
 def test_the_repo_refuses_an_empty_owner():
-    assert asyncio.run(PgWorksRepo().create_personal("x", "Важно", None, "🗂️ Прочее", "", 3)) is None
+    assert asyncio.run(PgWorksRepo().create_personal(PROBE_TITLE, "Важно", None, "🗂️ Прочее", "", 3)) is None
+    with get_engine().connect() as c:
+        assert c.execute(select(works_table.c.id).where(works_table.c.title == PROBE_TITLE)).first() is None
 
 
 # ══ без клиента: по конструкции ══════════════════════════════════════════════
