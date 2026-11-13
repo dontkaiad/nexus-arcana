@@ -200,7 +200,7 @@ async def _attach_parent_tasks(items: list[dict], tg_id: int, user_id: str) -> N
         deadline_raw = task.deadline or ""
         reminder_raw = task.reminder or ""
         deadline_local = to_local_date(deadline_raw, tz_offset)
-        deadline_time = extract_time(deadline_raw, tz_offset)
+        deadline_time = extract_time(deadline_raw, tz_offset, bool(getattr(task, "deadline_all_day", False)))
         repeat = task.repeat if task.repeat not in ("Нет", None) else None
         reminder_min = None
         if deadline_raw and reminder_raw:

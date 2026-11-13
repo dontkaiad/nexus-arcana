@@ -72,6 +72,7 @@ def _task_summary(task: PgTask, tz_offset: int) -> dict:
         "cat": task.category or "",
         "prio": prio_from_notion(task.priority),
         "deadline_raw": task.deadline or "",
+        "deadline_all_day": bool(getattr(task, "deadline_all_day", False)),
         "reminder_raw": task.reminder or "",
         "repeat_time": (task.repeat_time or "").strip(),
         "repeat": repeat,
@@ -289,7 +290,7 @@ async def get_today(tg_id: int = Depends(current_user_id)) -> dict[str, Any]:
 
     for s in summaries:
         deadline_date = to_local_date(s["deadline_raw"], tz_offset)
-        deadline_time = extract_time(s["deadline_raw"], tz_offset)
+        deadline_time = extract_time(s["deadline_raw"], tz_offset, s.get("deadline_all_day", False))
         reminder_date = to_local_date(s["reminder_raw"], tz_offset)
         repeat_time = s["repeat_time"] or None
 

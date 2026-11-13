@@ -163,7 +163,10 @@ async def get_calendar(
         deadline_date = to_local_date(deadline_raw, tz_offset)
         reminder_date = to_local_date(reminder_raw, tz_offset)
         if time_val is None:
-            time_val = extract_time(deadline_raw, tz_offset) or extract_time(reminder_raw, tz_offset)
+            time_val = (
+                extract_time(deadline_raw, tz_offset, bool(getattr(task, "deadline_all_day", False)))
+                or extract_time(reminder_raw, tz_offset)
+            )
 
         # Anchor: Напоминание → Дедлайн → дата создания (последнее — для select-only повторов).
         anchor = reminder_date or deadline_date

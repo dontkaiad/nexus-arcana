@@ -510,6 +510,37 @@ def test_task_edit_deadline_defaults_0900_when_no_existing_time(client):
     assert props["Дедлайн"]["date"]["start"] == "2026-08-23T09:00:00+05:00"
 
 
+def _edit_deadline(client, task, body, tz=3):
+    with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",
+               AsyncMock(return_value=task)), \
+         patch("miniapp.backend.routes.writes._tasks_pg_repo.set_props",
+               AsyncMock(return_value=None)) as upd, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(tz), tz))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post(f"/api/tasks/{task.id}/edit", json=body)
+    assert r.status_code == 200
+    return upd.await_args.args[1]["Дедлайн"]["date"]["start"]
+
+
+def test_task_edit_all_day_deadline_stays_all_day_when_only_date_changes(client):
+    """Дедлайн без времени + правка только даты → остаётся all-day: голая
+    дата (repo ставит deadline_all_day по отсутствию «T»), без 09:00."""
+    task = _pg_task("t-edit-ad1", "Test", deadline="2026-08-20T00:00:00+00:00",
+                    user_id=FAKE_USER_ID)
+    task.deadline_all_day = True
+    assert _edit_deadline(client, task, {"date": "2026-08-23"}) == "2026-08-23"
+
+
+def test_task_edit_all_day_deadline_gets_time_only_when_explicit(client):
+    task = _pg_task("t-edit-ad2", "Test", deadline="2026-08-20T00:00:00+00:00",
+                    user_id=FAKE_USER_ID)
+    task.deadline_all_day = True
+    start = _edit_deadline(client, task, {"date": "2026-08-23", "deadline_time": "11:00"})
+    assert start == "2026-08-23T11:00:00+03:00"
+
+
 def test_task_edit_invalid_deadline_time_400s(client):
     task = _pg_task("t-edit-4", "Test", user_id=FAKE_USER_ID)
     with patch("miniapp.backend.routes.writes._tasks_pg_repo.retrieve_page",

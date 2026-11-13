@@ -78,3 +78,7 @@ marker printed to stdout.**
 - **The `script:` block in `deploy.yml` is never executed.** It now contains a single
   comment pointing to this ADR, making the dead-code nature explicit rather than leaving
   realistic-looking shell that silently does nothing.
+- **Known risk (as of 2026-11-13):** `deploy.sh` lives on the VPS outside this repo and runs `alembic upgrade head` on every deploy **without a
+  backup**. On the local database a migration was found applied by hand without a row in `alembic_version`, so the same drift is possible on the server.
+  Needed: a `pg_dump` before `alembic upgrade head` in the script, and the script itself kept in the repo (the forced command can still call a copy).
+  Until then, check the server with `alembic current` and `alembic heads` after a deploy that adds migrations.

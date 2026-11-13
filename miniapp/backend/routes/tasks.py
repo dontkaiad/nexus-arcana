@@ -65,7 +65,7 @@ def _compute_reminder_min(deadline_raw: str, reminder_raw: str) -> Optional[int]
 def _serialize_pg_task(task: PgTask, today_date, tz_offset: int) -> dict:
     deadline_raw = task.deadline or ""
     deadline_local = to_local_date(deadline_raw, tz_offset)
-    deadline_time = extract_time(deadline_raw, tz_offset)
+    deadline_time = extract_time(deadline_raw, tz_offset, bool(getattr(task, "deadline_all_day", False)))
     reminder_raw = task.reminder or ""
     reminder_local = to_local_date(reminder_raw, tz_offset)
     reminder_time = extract_time(reminder_raw, tz_offset)

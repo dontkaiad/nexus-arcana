@@ -175,9 +175,14 @@ def to_local_date(iso: str, tz_offset: int) -> Optional[date]:
     return dt.astimezone(timezone(timedelta(hours=tz_offset))).date()
 
 
-def extract_time(iso: str, tz_offset: int) -> Optional[str]:
-    """ISO datetime → 'HH:MM' в локальном tz; None если чистая дата."""
-    if not iso or len(iso) <= 10:
+def extract_time(iso: str, tz_offset: int, all_day: bool = False) -> Optional[str]:
+    """ISO datetime → 'HH:MM' в локальном tz; None если чистая дата.
+
+    all_day=True (дедлайн «на весь день», PgTask.deadline_all_day) — времени нет:
+    в PG такой дедлайн лежит как полночь UTC (`_parse_iso` дополняет дату), и без
+    этого флага она показывалась как «03:00» (МСК). Для дедлайна ВСЕГДА передавай
+    deadline_all_day задачи; для напоминаний флаг не нужен."""
+    if all_day or not iso or len(iso) <= 10:
         return None
     dt = _parse_iso(iso)
     if not dt:
