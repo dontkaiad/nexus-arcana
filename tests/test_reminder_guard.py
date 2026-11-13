@@ -145,7 +145,10 @@ class TestVoiceTranscriptReachesGuard:
             "reminder": "2026-07-28T09:00",  # галлюцинация Haiku
             "repeat": "Нет",
         }
-        with patch.object(tasks, "_do_save_task", AsyncMock()) as save, \
+        from freezegun import freeze_time
+        # «сейчас» = 27.07, чтобы детерминированное «завтра» совпало с датой фикстуры Haiku
+        with freeze_time("2026-07-27 09:00:00", tick=True), \
+             patch.object(tasks, "_do_save_task", AsyncMock()) as save, \
              patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
              patch.object(tasks, "_pending_set", lambda *a, **k: None):
             await tasks.handle_task_parsed(

@@ -109,7 +109,10 @@ async def test_deadline_in_text_skips_when_to_do_question():
     data = {"title": "подготовить предмет к продаже", "deadline": "2026-09-13",
             "category": "🏠 Жильё", "repeat": "Нет"}
 
-    with patch.object(T, "_get_user_tz", AsyncMock(return_value=3)), \
+    from freezegun import freeze_time
+    # «сейчас» до 13 сентября: иначе детерминированный разбор верно уйдёт на 2027
+    with freeze_time("2026-09-01 09:00:00", tick=True), \
+         patch.object(T, "_get_user_tz", AsyncMock(return_value=3)), \
          patch.object(T, "_do_save_task", AsyncMock()) as save, \
          patch.object(T, "_pending_set", lambda *a, **k: None), \
          patch.object(T, "_has_remind_word", lambda *a, **k: False):

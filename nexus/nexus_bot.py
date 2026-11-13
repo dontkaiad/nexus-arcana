@@ -727,7 +727,11 @@ async def handle_text(msg: Message, user_id: str = "") -> None:
     from nexus.handlers.tasks import (
         _last_task_get, _CLARIFY_RE, _is_clarification_not_new_task, handle_last_task_clarify,
     )
-    if (_last_task_get(msg.from_user.id) and _CLARIFY_RE.search(_raw_text)
+    # Reply на карточку задачи/плашку напоминания побеждает last_task: правка
+    # идёт в ТУ карточку (process_text → handle_reply_update), а не в
+    # «последнюю созданную», которая может быть другой задачей.
+    _reply_to_card = await _is_reply_to_task_card(msg)
+    if (not _reply_to_card and _last_task_get(msg.from_user.id) and _CLARIFY_RE.search(_raw_text)
             and _is_clarification_not_new_task(_raw_text)):
         _handled = await handle_last_task_clarify(msg, _raw_text, msg.from_user.id, user_id)
         if _handled:
@@ -779,6 +783,24 @@ async def handle_text(msg: Message, user_id: str = "") -> None:
 
     text = maybe_convert(msg.text.strip())
     await process_text(msg, text, user_id)
+
+
+async def _is_reply_to_task_card(msg: Message) -> bool:
+    """True — reply на сообщение бота, у которого есть привязка к задаче
+    (карточка «Задача создана» в message_pages или плашка напоминания)."""
+    orig = msg.reply_to_message
+    if not orig or not orig.from_user or not orig.from_user.is_bot:
+        return False
+    try:
+        from core.message_pages import get_message_page
+        mapping = await get_message_page(msg.chat.id, orig.message_id)
+        if mapping and mapping.get("bot") == "nexus" and mapping.get("page_type") == "task":
+            return True
+        from core.task_reminder_msg import get_task_reminder_by_message
+        return bool(await get_task_reminder_by_message(msg.chat.id, orig.message_id))
+    except Exception as e:
+        logger.warning("_is_reply_to_task_card failed: %s", e)
+        return False
 
 
 async def process_text(msg: Message, text: str, user_id: str = "") -> None:
@@ -1611,6 +1633,13 @@ async def handle_unauthorized(msg: Message) -> None:
 
 async def main() -> None:
     logger.info("Nexus bot starting...")
+    # message_pages.db и pending_tasks.db раньше лежали в корне (вне volume) и
+    # стирались деплоем. Переносим из корня, если там остались; существующие
+    # файлы в data/ не затираем.
+    from core.data_paths import migrate_legacy_db, log_persistent_dbs
+    for _db_name in ("message_pages.db", "pending_tasks.db"):
+        migrate_legacy_db(_db_name)
+    log_persistent_dbs()
     from nexus.handlers.tasks import init_scheduler
     from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 

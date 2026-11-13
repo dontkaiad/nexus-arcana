@@ -127,7 +127,8 @@ def resolve_task_category(raw: str) -> "tuple[Optional[str], list[str]]":
 
 # ── SQLite persistent pending ──────────────────────────────────────────────────
 import os as _os
-_PENDING_DB = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "../../pending_tasks.db")
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень (#191)
+_PENDING_DB = _data_db_path("pending_tasks.db")
 _PENDING_TTL = 1800  # 30 minutes
 
 def _pdb() -> _sqlite3.Connection:
@@ -1614,6 +1615,63 @@ async def _check_procrastination_nudge(title: str, deadline: str = "", reminder_
         return ""
 
 
+_WHEN_KW_REM_RE = _re.compile(r"напомни\w*|напоминани\w*|напоминалк\w*", _re.IGNORECASE)
+_WHEN_KW_DL_RE = _re.compile(r"дедлайн\w*|срок\w*", _re.IGNORECASE)
+
+
+def _patch_when(iso: Optional[str], when: dict) -> Optional[str]:
+    """Подставить явные дату/время из текста (when) в значение Haiku (iso).
+    Что в тексте не названо — остаётся как вернул Haiku."""
+    date = when.get("date") or (iso[:10] if iso else None)
+    if not date:
+        return iso
+    time = when.get("time") or (iso[11:16] if iso and "T" in iso else None)
+    return f"{date}T{time}" if time else date
+
+
+def _override_when_from_text(data: dict, text: str, now: datetime) -> None:
+    """Детерминированный override: явная дата/время в тексте побеждают Haiku.
+
+    Текст режется по ключевым словам: после «напомни*» — сегмент напоминания,
+    после «дедлайн/срок» — дедлайна, до первого ключевого слова — дедлайн.
+    Каждый сегмент разбирает parse_when. Недостающее (дату или время)
+    оставляем от Haiku: «20 числа» при сегодня=13-е → 20-е ТЕКУЩЕГО месяца,
+    а не 2026-12-20, как ошибочно вернул бы Haiku. Меняет data на месте.
+    """
+    tz_offset = int(now.utcoffset().total_seconds() // 3600) if now.utcoffset() else 3
+    kws = sorted(
+        [(m.start(), m.end(), "reminder") for m in _WHEN_KW_REM_RE.finditer(text)]
+        + [(m.start(), m.end(), "deadline") for m in _WHEN_KW_DL_RE.finditer(text)]
+    )
+    explicit_deadline_kw = any(k[2] == "deadline" for k in kws)
+    segs: dict = {}
+    if not kws:
+        segs["deadline"] = text
+    else:
+        for i, (_s, e, kind) in enumerate(kws):
+            end = kws[i + 1][0] if i + 1 < len(kws) else len(text)
+            segs[kind] = (segs[kind] + " " if kind in segs else "") + text[e:end]
+        if kws[0][0] > 0 and not explicit_deadline_kw:
+            segs["deadline"] = text[: kws[0][0]]  # «завтра в 10 напомни в 9:30»
+
+    for kind, seg in segs.items():
+        when = _parse_when(seg, tz_offset, now)
+        if not (when["date"] or when["time"]):
+            continue
+        if kind == "reminder":
+            if data.get("reminder"):
+                data["reminder"] = _patch_when(data["reminder"], when)
+            elif not explicit_deadline_kw and data.get("deadline"):
+                # «напомни <дата>» — Haiku положил её в deadline, дальше он
+                # копируется в reminder_time (см. handle_task_parsed).
+                data["deadline"] = _patch_when(data["deadline"], when)
+            elif when["date"]:
+                data["reminder"] = _patch_when(None, when)
+        else:  # deadline
+            if data.get("deadline") or when["date"]:
+                data["deadline"] = _patch_when(data.get("deadline"), when)
+
+
 async def handle_task_parsed(message: Message, data: dict, original_text: str = "") -> None:
     """Парсим задачу. Если есть 'напомни' — уже знаем reminder, спрашиваем дедлайн.
     Иначе — спрашиваем когда напомнить.
@@ -1671,6 +1729,12 @@ async def handle_task_parsed(message: Message, data: dict, original_text: str = 
                      repeat, _ivl, first_run, data["deadline"], repeat_time_raw)
         await _do_save_task(message, data, chat_id=message.chat.id, uid=uid)
         return
+
+    # Явная дата/время в тексте побеждают ISO от Haiku (не повторяющиеся задачи).
+    try:
+        _override_when_from_text(data, original_text, datetime.now(timezone(timedelta(hours=tz_offset))))
+    except Exception as e:  # override — страховка, не должна ронять создание
+        logger.warning("handle_task_parsed: when override failed: %s", e)
 
     # Гвард: если Haiku додумал reminder, но в тексте нет слова «напомни» —
     # отбрасываем галлюцинированное напоминание (issue #33).

@@ -10,10 +10,11 @@ import aiosqlite
 
 logger = logging.getLogger("core.message_pages")
 
-DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "message_pages.db",
-)
+# В DATA_DIR (docker volume), а не в корень репо — иначе файл стирается
+# каждым деплоем и reply на старую карточку теряет задачу (см. core/data_paths).
+from core.data_paths import data_db_path
+
+DB_PATH = data_db_path("message_pages.db")
 
 _TABLE_DDL = """
     CREATE TABLE IF NOT EXISTS message_pages (
