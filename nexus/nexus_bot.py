@@ -1636,10 +1636,9 @@ async def main() -> None:
     # message_pages.db и pending_tasks.db раньше лежали в корне (вне volume) и
     # стирались деплоем. Переносим из корня, если там остались; существующие
     # файлы в data/ не затираем.
-    from core.data_paths import migrate_legacy_db, log_persistent_dbs
-    for _db_name in ("message_pages.db", "pending_tasks.db"):
-        migrate_legacy_db(_db_name)
-    log_persistent_dbs()
+    from core.data_paths import migrate_legacy_dbs, log_persistent_dbs
+    migrate_legacy_dbs(("shared", "nexus"))
+    log_persistent_dbs(("shared", "nexus"))
     from nexus.handlers.tasks import init_scheduler
     from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 

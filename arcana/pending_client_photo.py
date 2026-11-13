@@ -20,7 +20,8 @@ import aiosqlite
 
 logger = logging.getLogger("arcana.pending_client_photo")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "pending_client_photo.db")
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+DB_PATH = _data_db_path("pending_client_photo.db")
 _TTL = 600  # 10 минут
 
 _TABLE_DDL = """

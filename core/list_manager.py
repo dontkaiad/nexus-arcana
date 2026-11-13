@@ -67,7 +67,8 @@ LIST_TYPES = ["🛒 Покупки", "📋 Чеклист", "📦 Инвента
 
 # ── Pending state (SQLite) ────────────────────────────────────────────────────
 
-_PENDING_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../pending_lists.db")
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+_PENDING_DB = _data_db_path("pending_lists.db")
 _PENDING_TTL = 1800  # 30 min
 
 

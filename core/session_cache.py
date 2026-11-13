@@ -10,7 +10,8 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-_DB_PATH = Path(__file__).parent.parent / "session_cache.db"
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+_DB_PATH = Path(_data_db_path("session_cache.db"))
 _INITED = False
 
 

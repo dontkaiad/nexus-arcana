@@ -15,7 +15,8 @@ import aiosqlite
 
 logger = logging.getLogger("arcana.pending_grimoire_search")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "pending_grimoire_search.db")
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+DB_PATH = _data_db_path("pending_grimoire_search.db")
 
 _TABLE_DDL = """
     CREATE TABLE IF NOT EXISTS pending_grimoire_search (

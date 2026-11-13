@@ -61,15 +61,56 @@ def migrate_legacy_db(name: str, legacy_dir: Optional[str] = None) -> Optional[s
     return dst
 
 
-def log_persistent_dbs() -> None:
-    """Стартовый лог: абсолютные пути обеих БД и лежат ли они в data/."""
-    from core import message_pages
-    from nexus.handlers import tasks
+# Реестр SQLite-файлов, которые обязаны жить в data/ (volume).
+# имя файла → (модуль, атрибут с путём, группа). Группа решает, какой бот
+# мигрирует/логирует файл на старте: shared — оба, nexus / arcana — свой.
+PERSISTENT_DBS = {
+    "message_pages.db": ("core.message_pages", "DB_PATH", "shared"),
+    "task_reminder_msg.db": ("core.task_reminder_msg", "DB_PATH", "shared"),
+    "pending_kv.db": ("core.pending_kv", "_DB_PATH", "shared"),
+    "pending_lists.db": ("core.list_manager", "_PENDING_DB", "shared"),
+    "spell_whitelist.db": ("core.preprocess", "_WHITELIST_DB", "shared"),
+    "session_cache.db": ("core.session_cache", "_DB_PATH", "arcana"),
+    "pending_tasks.db": ("nexus.handlers.tasks", "_PENDING_DB", "nexus"),
+    "pending_note_edit.db": ("nexus.pending_note_edit", "DB_PATH", "nexus"),
+    "pending_clients.db": ("arcana.pending_clients", "DB_PATH", "arcana"),
+    "pending_client_photo.db": ("arcana.pending_client_photo", "DB_PATH", "arcana"),
+    "pending_tarot.db": ("arcana.pending_tarot", "DB_PATH", "arcana"),
+    "pending_grimoire_search.db": ("arcana.pending_grimoire_search", "DB_PATH", "arcana"),
+    "pending_writeoff.db": ("arcana.handlers.ritual_writeoff", "_DB", "arcana"),
+    "pending_works.db": ("arcana.handlers.work_preview", "_PENDING_DB", "arcana"),
+    "pending_barter.db": ("arcana.handlers.barter_prompt", "_DB", "arcana"),
+}
+
+
+def _names_for(groups) -> list:
+    return [n for n, (_m, _a, g) in PERSISTENT_DBS.items() if g in groups]
+
+
+def migrate_legacy_dbs(groups=("shared", "nexus", "arcana")) -> dict:
+    """migrate_legacy_db для всех файлов групп. Возвращает {имя: новый путь} для перенесённых."""
+    moved = {}
+    for name in _names_for(groups):
+        out = migrate_legacy_db(name)
+        if out:
+            moved[name] = out
+    return moved
+
+
+def log_persistent_dbs(groups=("shared", "nexus", "arcana")) -> None:
+    """Стартовый лог: абсолютный путь КАЖДОЙ БД группы (берём реальный атрибут
+    модуля, а не рассчитанный) и лежит ли она в data/."""
+    import importlib
 
     d = data_dir()
-    for label, path in (("message_pages", message_pages.DB_PATH), ("pending_tasks", tasks._PENDING_DB)):
-        p = os.path.abspath(path)
+    for name in _names_for(groups):
+        mod_name, attr, _g = PERSISTENT_DBS[name]
+        try:
+            path = os.path.abspath(str(getattr(importlib.import_module(mod_name), attr)))
+        except Exception as e:  # модуль группы может не импортироваться в чужом боте
+            logger.warning("persistent db %s: cannot resolve (%s.%s): %s", name, mod_name, attr, e)
+            continue
         logger.info(
             "persistent db %s: path=%s in_data_dir=%s exists=%s",
-            label, p, os.path.dirname(p) == d, os.path.exists(p),
+            name, path, os.path.dirname(path) == d, os.path.exists(path),
         )

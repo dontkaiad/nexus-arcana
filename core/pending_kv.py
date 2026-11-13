@@ -24,7 +24,8 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger("core.pending_kv")
 
-_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pending_kv.db")
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+_DB_PATH = _data_db_path("pending_kv.db")
 _DEFAULT_TTL = 1800  # 30 минут
 
 

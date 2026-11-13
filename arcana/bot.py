@@ -399,6 +399,12 @@ async def main():
     quiet_http_loggers()  # токен бота в URL httpx (#268)
     from core.logging_notion import install as _install_notion_logging
     _install_notion_logging(bot_label="🌒 Arcana")
+    # pending_*.db раньше лежали в корне (вне volume) и стирались деплоем:
+    # переносим остатки из корня (no-op, если файла нет; существующий в data/
+    # не затираем) и логируем пути.
+    from core.data_paths import migrate_legacy_dbs, log_persistent_dbs
+    migrate_legacy_dbs(("shared", "arcana"))
+    log_persistent_dbs(("shared", "arcana"))
 
     dp, bot = create_dp_and_bot()
 

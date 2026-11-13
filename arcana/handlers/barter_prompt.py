@@ -38,7 +38,8 @@ LIST_TYPE_CHECKLIST = "📋 Чеклист"
 
 # ── Pending state ────────────────────────────────────────────────────────────
 
-_DB = os.path.join(os.path.dirname(__file__), "..", "..", "pending_barter.db")
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+_DB = _data_db_path("pending_barter.db")
 _TTL = 1800  # 30 мин
 
 

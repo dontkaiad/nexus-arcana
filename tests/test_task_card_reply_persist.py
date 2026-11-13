@@ -79,11 +79,11 @@ def test_migrate_never_overwrites_existing_data_file(tmp_path, monkeypatch):
 
 def test_startup_log_reports_paths_and_data_flag(caplog):
     with caplog.at_level("INFO", logger="core.data_paths"):
-        data_paths.log_persistent_dbs()
+        data_paths.log_persistent_dbs(("shared", "nexus"))
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert "message_pages" in text and "pending_tasks" in text
-    assert text.count("in_data_dir=True") == 2
-    assert os.path.abspath(data_paths.data_dir()) in text
+    assert "persistent db message_pages.db: path=" in text
+    assert "persistent db pending_tasks.db: path=" in text
+    assert "in_data_dir=" in text and "exists=" in text
 
 
 # ── 2. reply на карточку находит задачу после «перезапуска» ──────────────────

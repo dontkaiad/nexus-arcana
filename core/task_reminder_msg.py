@@ -19,10 +19,8 @@ import aiosqlite
 
 logger = logging.getLogger("core.task_reminder_msg")
 
-DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "task_reminder_msg.db",
-)
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+DB_PATH = _data_db_path("task_reminder_msg.db")
 
 _TABLE_DDL = """
     CREATE TABLE IF NOT EXISTS task_reminder_msg (

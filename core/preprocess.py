@@ -29,11 +29,8 @@ from core.layout import maybe_convert
 
 logger = logging.getLogger("core.preprocess")
 
-_WHITELIST_DB = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "..",
-    "spell_whitelist.db",
-)
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+_WHITELIST_DB = _data_db_path("spell_whitelist.db")
 _WHITELIST_TTL = 3600  # 1 hour
 
 

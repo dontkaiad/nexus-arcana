@@ -61,9 +61,8 @@ router = Router()
 _PRIORITY_EMOJI = {"Срочно": "🔴", "Важно": "🟡", "Можно потом": "⚪"}
 
 # ── SQLite pending store ──────────────────────────────────────────────────────
-_PENDING_DB = _os.path.join(
-    _os.path.dirname(_os.path.abspath(__file__)), "../../pending_works.db"
-)
+from core.data_paths import data_db_path as _data_db_path  # volume /app/data, не корень
+_PENDING_DB = _data_db_path("pending_works.db")
 _PENDING_TTL = 1800  # 30 минут — как в Nexus
 
 
