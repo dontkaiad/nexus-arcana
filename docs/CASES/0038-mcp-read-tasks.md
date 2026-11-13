@@ -41,11 +41,17 @@ A static bearer token, read-only, valid for exactly one route.
 - Enabling is an `.env` edit on the server followed by a recreate of `nexus-bot`; the same token goes to `kai-mcp` as `NEXUS_MCP_TOKEN`. Rotation: change both, recreate both.
 - The token holder reads every task of the owner except the hidden categories. That is the intent.
 - The public proxy also serves this route: a leaked token works from outside until rotated (256 bits, read-only, rate-limited).
+- **`note` does not go to MCP (decided on the `kai-mcp` side).** `/api/tasks` still returns `note` (the Mini App needs it), but `kai-mcp` drops it before the
+  answer reaches Claude: Claude gets `id`, `title`, `cat` (as a string), `prio`, `status`, the dates and times, `repeat`, `closed_at`. Why: the note is free text
+  and is where other people's names land (bookings write "с <имя> · бронь #…", birthdays and cat visits add names too), while the owner's question
+  "what is on my list" does not need it. The cut is on the consumer's side, so a leaked token still reads `note` from this API; the filter below and
+  this cut are two separate guards. A test in `kai-mcp` fails if `note` ever appears in the `nexus_tasks` answer, even when the backend sends it.
+  `title` is still free text and is not filtered.
 - The category filter is a guard, not proof of privacy: today these two names are finance and list categories and are not stored for tasks (`task_category` has no such row, a task saved with such a category falls back to "Прочее"). Private names in a free-text `title` or `note` are **not** filtered.
 - A shared in-memory limiter is per process; a second replica would count separately (single container today).
 
 ## Not covered
 
 `GET /api/arcana/reminders` (reminders of the practice without client data) is a separate step and is not enabled.
-The consumer (`kai-mcp`: client, the cut-down task view, rendering) lives in its own repository.
+The consumer (`kai-mcp`: client, the cut-down task view without `note`, the `arcana_reminders` tool switched on only by `ARCANA_ENABLED=1`, rendering) lives in its own repository.
 Live verification against production is a post-deploy read-only smoke, not a CI test.
