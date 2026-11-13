@@ -2334,6 +2334,15 @@ function DebtDrillSheet({ s, debt, onDone }) {
   );
 }
 
+// «2026-11-20» → «20 ноя». Уровень модуля: нужна и CushionScreen, и RitualDetail
+// (раньше была локальной в CushionScreen → ReferenceError в RitualDetail).
+const fmtDate = (iso) => {
+  if (!iso) return "";
+  const [, m, d] = iso.split("-");
+  const months = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1] || m}`;
+};
+
 function CushionScreen({ s, data, refetch }) {
   const { balance, target, planned, txs } = adaptFinanceCushion(data);
   const [editing, setEditing] = useState(false);
@@ -2371,13 +2380,6 @@ function CushionScreen({ s, data, refetch }) {
     } finally {
       setSaving(false);
     }
-  };
-
-  const fmtDate = (iso) => {
-    if (!iso) return "";
-    const [y, m, d] = iso.split("-");
-    const months = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-    return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1] || m}`;
   };
 
   const kfmt = (n) => (Math.abs(n) >= 1000 ? `${Math.round(n / 1000)}к` : Math.round(n));
