@@ -118,7 +118,7 @@ def _opened_by(hdr):
                 g._limiter.reset()
             with_t = c.request(method, path, headers=hdr, **kw).status_code
             without = c.request(method, path, **kw).status_code
-            if with_t not in (401, 403) and without in (401, 403):
+            if with_t not in (401, 403, 429) and without in (401, 403):      # 429 лимита неверных попыток: тоже отказ
                 opened.add((method, r.path))
     return opened
 

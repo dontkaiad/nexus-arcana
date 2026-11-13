@@ -222,7 +222,7 @@ def _opened_by(hdr):
                 m._limiter = m.FailureLimiter()
             with_token = client.request(method, path, headers=hdr, **kw).status_code
             without = client.request(method, path, **kw).status_code
-            if with_token not in (401, 403) and without in (401, 403):
+            if with_token not in (401, 403, 429) and without in (401, 403):      # 429 лимита неверных попыток: тоже отказ
                 opened.add((method, r.path))
     return opened
 

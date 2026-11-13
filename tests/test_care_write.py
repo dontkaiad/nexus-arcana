@@ -246,7 +246,7 @@ def _opened_by(token_hdr):
             kw = {"json": {}} if method in ("POST", "PUT", "PATCH", "DELETE") else {}
             with_token = client.request(method, path, headers=token_hdr, **kw).status_code
             without = client.request(method, path, **kw).status_code
-            if with_token not in (401, 403) and without in (401, 403):
+            if with_token not in (401, 403, 429) and without in (401, 403):      # 429 лимита неверных попыток: тоже отказ
                 opened.add((method, r.path))
     return opened
 

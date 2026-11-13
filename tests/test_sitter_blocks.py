@@ -207,7 +207,7 @@ def test_every_route_opened_by_a_service_token_leaks_no_closed_fact(client):
             for method in sorted(r.methods - {"HEAD", "OPTIONS"}):
                 kw = {"json": {"q": "кто сидит в комнате"}} if method in ("POST", "PUT", "PATCH", "DELETE") else {}
                 got = tc.request(method, path, headers=tok, **kw)
-                if got.status_code in (401, 403) or tc.request(method, path, **kw).status_code not in (401, 403):
+                if got.status_code in (401, 403, 429) or tc.request(method, path, **kw).status_code not in (401, 403):
                     continue                                                                           # токеном не открыто (или открыто и без него: не служебный доступ)
                 scanned += 1
                 assert_no_closed(got.text)
