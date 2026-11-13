@@ -39,6 +39,24 @@ Two **new** routes under a **separate** write token. The existing routes stay cl
 - **Nothing for anybody else:** no Google Calendar (tasks are not synced there; the ICS feed holds bookings only), no message to a third person (that is why booking-linked tasks are refused), no sitter schedule (`for_sitter` stays false), no cost (no LLM call).
 - The chat confirmation that the Mini App sends on create ("➕ Создала задачу") is **not** sent: the log-group alert replaces it.
 
+## Warning about an overlap with a friend's booking (D2, added 2026-11-13)
+
+A task made or moved through MCP occupies the owner's time in the Zarya booking view (see the side effects above). Zarya's busy calculation
+and the bookings themselves are **not** changed (variant A); instead the answer **warns**.
+
+| Rule | Detail |
+|---|---|
+| When | After a successful create or reschedule, the final time of the task is compared with the existing bookings. The task is created or moved **anyway**; nothing is blocked. |
+| Length of the task | The same rule as `core/booking/busy.py`, taken from it (`DEFAULT_BUSY_MINUTES`, `_all_day_span`): a task with a time takes its `duration_min`, or 60 minutes when it has none (a task created from MCP has none; a moved one keeps its own); a task without a time (an all-day deadline) takes the **whole local day** in the display zone of the booking surface (hard-coded MSK, as in `busy.py`). |
+| Length of a booking | Its real `start_at` to `end_at` (no default; the booking holds what the friend asked for). |
+| Which bookings | Only those that hold a slot (`BLOCKING_BOOKING_STATUSES`: `pending`, `confirmed`) and have not ended yet. Declined, cancelled by either side, expired and completed ones do not count; a past booking does not count; a booking of another owner does not count (a legacy booking with an empty owner does, exactly as in `busy.py`). |
+| Overlap | Strict, as in `busy.py` (`start < end` and `end > start`): a booking that ends when the task starts (or starts when it ends) is **not** an overlap; one minute of common time is. |
+| Answer | `conflicts`: a list of `{date, starts, ends}` (the owner's local time), sorted by start; an empty list when nothing overlaps; **`null` when the bookings could not be read** (the task is still written). **No name, no booking id, no contact, no topic.** |
+| Alert | One extra message to the same topic: "⚠️ Задача #id <title> пересекается с бронью <имя> <дата начало-конец>, перенеси" (several bookings in one message). **The friend's name appears only here** (the closed topic); title and name are HTML-escaped; the contact and the topic of the booking are never read into a message. |
+| Read only | Bookings are read through the existing `core.booking.repo.list_bookings`; no write to the booking tables, no new route, nothing new for the write token (the all-routes test still shows exactly the two POSTs; a test compares the whole booking table before and after). |
+
+`kai-mcp` passes `conflicts` on through a white list (`date`, `starts`, `ends`) and its tool descriptions tell the model to say it to Kai in plain words and offer to move the task.
+
 ## Alternatives rejected
 
 - **Reuse `POST /api/tasks` and `/postpone` under a token:** they also edit, cancel and close, and send chat messages; a token for them would open much more than two actions.
