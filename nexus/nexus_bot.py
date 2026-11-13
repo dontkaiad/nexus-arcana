@@ -1025,7 +1025,7 @@ async def process_text(msg: Message, text: str, user_id: str = "") -> None:
         "list_check": "🫡", "list_subtask": "🫡",
         "list_inventory_add": "🌚", "list_inventory_search": "👀",
         "list_inventory_update": "🌚", "list_sum": "🤓",
-        "edit_record": "⚡", "stats": "🤓",
+        "edit_record": "⚡", "stats": "🤓", "question": "👀",
         "budget": "🏆", "debt_command": "🏆",
         "goal_command": "🏆", "limit_override": "🏆",
         "timezone_update": "⚡",

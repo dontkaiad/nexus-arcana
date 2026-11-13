@@ -57,7 +57,7 @@ def test_fast_regex_unchanged_for_simple_hour():
     assert m and m.group(1) == "18"
 
 
-# ── handle_last_task_clarify: день месяца идёт через Haiku ─────────────────
+# ── handle_last_task_clarify: день месяца парсится детерминированно ─────────
 
 @pytest.mark.asyncio
 async def test_day_of_month_reminder_does_not_swap_day_and_hour():
@@ -86,11 +86,12 @@ async def test_day_of_month_reminder_does_not_swap_day_and_hour():
             handled = await tasks.handle_last_task_clarify(msg, msg.text, uid)
 
         assert handled is True
-        # Быстрый regex не должен был сработать → парсинг ушёл в Haiku
-        ask_mock.assert_awaited_once()
+        # Дата/время разобраны без LLM (core.date_extract.parse_when)
+        ask_mock.assert_not_called()
         assert update_calls, "set_props должен быть вызван"
         _, props = update_calls[-1]
-        assert props["Напоминание"]["date"]["start"].startswith(correct_dt)
+        start = props["Напоминание"]["date"]["start"]
+        assert start[8:10] == "20" and start[10:16] == "T18:00", start
 
         # Плашка зарегистрирована — reply-исправление найдёт эту задачу
         save_mock.assert_awaited_once()
@@ -139,7 +140,7 @@ async def test_haiku_failure_leaves_task_untouched():
 
     uid = 771_103
     page_id = "task-dom-3"
-    msg, _sent = _msg(uid, "напомни 20 числа в 18 часов")
+    msg, _sent = _msg(uid, "напомни 3.12")
 
     tasks._last_task_set(uid, page_id)
 

@@ -164,7 +164,7 @@ def build_system(tz_offset: int = 3) -> str:
     srcs = ", ".join(["💳 Карта", "💵 Наличные", "🔄 Бартер"])
 
     return "\n".join([
-        "КРИТИЧЕСКИ ВАЖНО: Ты ТОЛЬКО классифицируешь сообщения и возвращаешь JSON. Никогда не отвечай на вопросы, не давай советы, не объясняй что ты можешь или не можешь. Если сообщение похоже на поиск чего-либо в истории/заметках/задачах — это note_search или task_search. Всегда возвращай ТОЛЬКО валидный JSON без markdown и пояснений. Если не можешь классифицировать — верни {\"type\":\"unknown\"}.",
+        "КРИТИЧЕСКИ ВАЖНО: Ты ТОЛЬКО классифицируешь сообщения и возвращаешь JSON. Никогда не отвечай на вопросы, не давай советы, не объясняй что ты можешь или не можешь. Если сообщение похоже на поиск чего-либо в истории/заметках/задачах — это note_search; вопрос про свои задачи («стоит ли у меня задача X») — question. Всегда возвращай ТОЛЬКО валидный JSON без markdown и пояснений. Если не можешь классифицировать — верни {\"type\":\"unknown\"}.",
         "",
         f"Сегодня: {today}, {today_dow}.",
         "",
@@ -312,6 +312,10 @@ def build_system(tz_offset: int = 3) -> str:
         "  'напомни мысли про практику' → {\"type\":\"note_search\",\"query\":\"практика\"}",
         "  'покажи все мои заметки' → {\"type\":\"note_search\",\"query\":\"\"}",
         "ВАЖНО: note_search только если явно просят найти/показать/вспомнить/искать заметку!",
+        "question — вопрос про СВОИ задачи/напоминания (не создание, не правка):",
+        '{"type":"question","scope":"task","text":"оригинальный текст"}',
+        "  'стоит ли у меня задача про биометрию' → question",
+        "  'есть ли напоминание про корм?' → question",
         "query = самое смысловое слово или фраза из запроса (1–3 слова), или пустая строка если ищут всё",
         "",
         "edit_note — редактировать поле существующей заметки (теги):",
@@ -719,6 +723,17 @@ _CURRENCY_RE = re.compile(r"\d+\s*(₽|руб\.?|р\b)", re.IGNORECASE)
 
 # явное добавление задачи: «добавь/поставь/создай задачу X» или «задача: X»
 # Матчит только add-команды — не поиск («покажи задачи»), не удаление («удали задачу»).
+# Вопрос про СВОИ задачи («стоит ли у меня задача X», «есть ли напоминание про X?»):
+# не создание и не правка — поиск по задачам (type=question).
+_TASK_QUESTION_RE = re.compile(
+    r"^\s*(?:а\s+)?(?:скажи,?\s+|подскажи,?\s+)?(?:"
+    r"(?:стоит|есть|была|будет|висит|заведена|создана|поставлена|стояла|лежит)\s+ли\b"
+    r"(?=.*\b(?:задач|напоминани|напоминалк|дедлайн))"
+    r"|у\s+меня\s+(?:есть|стоит|висит)\b"
+    r"(?=[^?]*\b(?:задач|напоминани|напоминалк|дедлайн)\w*[^?]*\?)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
 _TASK_EXPLICIT_RE = re.compile(
     r"^\s*(?:(?:добавь|добавить|поставь|поставить|создай|создать|заведи|завести)"
     r"\s+(?:новую\s+)?задач[уие]\s*[:：]?\s*"
@@ -909,6 +924,13 @@ async def classify(text: str, tz_offset: int = 3, user_id: str = "") -> list[dic
         hint = re.sub(r"^\s*(про|о|об)\s+", "", hint, flags=re.IGNORECASE).strip()
         logger.info("classify: memory_delete matched, hint=%r", hint)
         return [{"type": "memory_delete", "hint": hint, "text": text}]
+
+    # Вопрос «стоит ли у меня задача X» → question (поиск по задачам). Ставим
+    # раньше edit/done/memory-фильтров: «задача»/«напоминание» в вопросе иначе
+    # уезжали в память/заметки/создание.
+    if _TASK_QUESTION_RE.match(text) and not _TASK_EXPLICIT_RE.match(text):
+        logger.info("classify: task question matched")
+        return [{"type": "question", "scope": "task", "text": text}]
 
     # Быстрые Budget v2 / they_owe фаст-пасы ниже матчят ключевое слово ГДЕ
     # УГОДНО в тексте (search, не match) — на короткой одной строке это ОК,
@@ -1680,6 +1702,11 @@ async def process_item(data: Dict[str, Any], original_text: str, msg, clarify: d
         return ""
 
     # ПОИСК ЗАМЕТОК
+    if kind == "question":
+        from nexus.handlers.tasks import handle_task_question
+        await handle_task_question(msg, data.get("text") or original_text, user_id=user_id)
+        return ""
+
     if kind == "note_search":
         from nexus.handlers.notes import handle_note_search
         logger.info("process_item: note_search query=%r", data.get("query", ""))

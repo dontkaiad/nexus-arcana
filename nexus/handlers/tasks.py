@@ -201,8 +201,12 @@ def last_record_get(uid: int) -> Optional[tuple]:
     return row  # (db_type, page_id) or None
 
 
-# ── last_task: последняя созданная задача (TTL 5 мин) для уточнений ─────────────
-_LAST_TASK_TTL = 300  # 5 minutes
+# ── last_task: последняя созданная задача для уточнений ────────────────────────
+# Скользящий TTL 10 мин (продлевается ТОЛЬКО успешной правкой, см.
+# _last_task_touch) + абсолютный потолок 30 мин от создания — иначе цепочка
+# правок держала бы контекст вечно. Хранится в SQLite, переживает рестарт.
+_LAST_TASK_TTL = 600  # 10 minutes, sliding
+_LAST_TASK_MAX_AGE = 1800  # 30 minutes since creation, absolute
 
 
 def _ltdb() -> _sqlite3.Connection:
@@ -211,27 +215,39 @@ def _ltdb() -> _sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS last_task "
         "(uid INTEGER PRIMARY KEY, page_id TEXT, ts REAL)"
     )
+    cols = {r[1] for r in con.execute("PRAGMA table_info(last_task)").fetchall()}
+    if "created_ts" not in cols:  # idempotent ALTER для уже существующих .db
+        con.execute("ALTER TABLE last_task ADD COLUMN created_ts REAL")
     con.commit()
     return con
 
 
 def _last_task_set(uid: int, page_id: str) -> None:
+    now = _time.time()
     with _ltdb() as con:
         con.execute(
-            "INSERT OR REPLACE INTO last_task (uid, page_id, ts) VALUES (?,?,?)",
-            (uid, page_id, _time.time()),
+            "INSERT OR REPLACE INTO last_task (uid, page_id, ts, created_ts) VALUES (?,?,?,?)",
+            (uid, page_id, now, now),
         )
 
 
+def _last_task_touch(uid: int) -> None:
+    """Продлить скользящее окно — вызывается только когда правка применилась."""
+    with _ltdb() as con:
+        con.execute("UPDATE last_task SET ts=? WHERE uid=?", (_time.time(), uid))
+
+
 def _last_task_get(uid: int) -> Optional[str]:
-    """Вернуть page_id последней задачи или None если истёк TTL."""
+    """Вернуть page_id последней задачи или None (истёк TTL или потолок)."""
     with _ltdb() as con:
         row = con.execute(
-            "SELECT page_id, ts FROM last_task WHERE uid=?", (uid,)
+            "SELECT page_id, ts, created_ts FROM last_task WHERE uid=?", (uid,)
         ).fetchone()
     if not row:
         return None
-    if _time.time() - row[1] > _LAST_TASK_TTL:
+    now = _time.time()
+    created = row[2] if row[2] is not None else row[1]
+    if now - row[1] > _LAST_TASK_TTL or now - created > _LAST_TASK_MAX_AGE:
         _last_task_del(uid)
         return None
     return row[0]
@@ -995,6 +1011,9 @@ import re as _re
 from core.date_extract import (  # noqa: E402  общий код Nexus/Arcana
     REL_TIME_RE as _REL_TIME_RE,
     parse_relative_time as _parse_relative_time,
+    parse_when as _parse_when,
+    merge_when as _merge_when,
+    strip_when_tokens,
 )
 
 
@@ -1076,7 +1095,9 @@ def _apply_user_time(reminder_time: str, original_text: str) -> str:
 # ── Follow-up clarification after task creation ────────────────────────────────
 
 _REMINDER_KW_RE = _re.compile(
-    r"напоминалк[уа]?|напомни(?:лку)?|поставь\s+напоминани[ея]|добавь\s+напоминани[ея]",
+    # «напоминание» ≠ «напомни…»: без отдельной ветки голое «напоминание 20 числа
+    # в 15» не считалось ключевым словом и уходило в создание новой задачи.
+    r"напоминалк[уа]?|напомни(?:лку)?|напоминани[ея]",
     _re.IGNORECASE,
 )
 
@@ -1109,7 +1130,7 @@ _CLARIFY_PRIORITY_RE = _re.compile(
 
 # Combined: any of these → potential clarification
 _CLARIFY_RE = _re.compile(
-    r"(?:напоминалк[уа]?|напомни(?:лку)?|поставь\s+напоминани[ея]|добавь\s+напоминани[ея]"
+    r"(?:напоминалк[уа]?|напомни(?:лку)?|напоминани[ея]"
     r"|дедлайн\s+\S|до\s+\S|срок\s+до"
     r"|категори[яю]\s+\S"
     r"|приоритет\s+\S)",
@@ -1117,25 +1138,42 @@ _CLARIFY_RE = _re.compile(
 )
 
 
-def _is_clarification_not_new_task(text: str) -> bool:
-    """True — текст выглядит как уточнение к уже созданной задаче (5-мин окно),
-    False — это новая задача, в которой просто встретились слова «напомни /
-    дедлайн / приоритет» (напр. «отдать подушки одеяла напомни завтра в 14
-    дедлайн 13 сентября»). Баг: `_CLARIFY_RE` матчит ключевое слово в любом
-    месте строки, и новая задача уходила уточнением в предыдущую.
+_EDIT_KW_STRIP_RE = _re.compile(
+    r"напоминалк\w*|напомни\w*|напоминани\w*|дедлайн\w*|срок\w*", _re.IGNORECASE
+)
+# Предлоги/цифры, которые остаются после вычёркивания даты и ключевых слов.
+_EDIT_FILLER = {"в", "на", "до", "к", "по", "с", "во", "и"}
+# Единственное допустимое «лишнее» слово в правке: «поставь напоминание на 15».
+_EDIT_SERVICE_WORDS = {
+    "поставь", "добавь", "установи", "сделай", "перенеси", "сдвинь", "смени",
+    "поменяй", "измени", "поправь", "мне", "пожалуйста", "пж", "плиз", "тоже",
+    "ещё", "еще", "это", "его", "её", "ее", "время", "дату", "дата", "задаче",
+    "задачу", "там", "тут", "теперь",
+}
 
-    Эвристика: у настоящего уточнения перед первым ключевым словом почти
-    нет собственного текста (≤2 значимых слова). Если впереди 3+ слова —
-    это заголовок новой задачи.
+
+def _is_clarification_not_new_task(text: str) -> bool:
+    """True — сообщение это ПРАВКА последней задачи; False — новая задача.
+
+    Правило: вычёркиваем слова про дату/время и «напоминание|дедлайн|срок»;
+    если остаётся пусто или ровно одно служебное слово («поставь», «добавь»…)
+    — это правка. Любой другой остаток — заголовок новой задачи
+    («доделать X напоминание 20 ноября» → остаётся «доделать X» → новая).
+    «категория X» / «приоритет X» целиком — тоже правка.
     """
-    m = _CLARIFY_RE.search(text or "")
-    if not m:
+    t = (text or "").strip()
+    if not t or not _CLARIFY_RE.search(t):
         return False
-    lead = (text[: m.start()]).strip()
-    if not lead:
+    if _CLARIFY_CATEGORY_RE.match(t) or _CLARIFY_PRIORITY_RE.match(t):
         return True
-    lead_words = [w for w in _re.split(r"\s+", lead) if len(w) > 1]
-    return len(lead_words) <= 2
+    rest = _EDIT_KW_STRIP_RE.sub(" ", strip_when_tokens(t))
+    words = [
+        w for w in _re.findall(r"[^\W\d_]+", rest, flags=_re.UNICODE)
+        if w not in _EDIT_FILLER
+    ]
+    if not words:
+        return True
+    return len(words) == 1 and words[0] in _EDIT_SERVICE_WORDS
 
 
 async def _haiku_parse_reminder_dt(text: str, tz_offset: int, tz_label: str = "") -> Optional[str]:
@@ -1186,9 +1224,11 @@ async def handle_last_task_clarify(
     uid: int,
     user_id: str = "",
 ) -> bool:
-    """Обработать уточнение после создания задачи (5-мин окно).
+    """Обработать правку последней задачи (скользящее окно 10 мин, потолок 30).
 
     Парсит напоминание/дедлайн/категорию/приоритет и применяет к последней задаче.
+    Дата/время — детерминированно (core.date_extract.parse_when), недостающую
+    часть берём из существующей задачи (merge_when).
     Возвращает True если уточнение обработано.
     """
     page_id = _last_task_get(uid)
@@ -1207,38 +1247,56 @@ async def handle_last_task_clarify(
     response_text = ""
     reschedule_reminder: Optional[tuple] = None
 
-    # ── Напоминание ──────────────────────────────────────────────────────────────
-    # Пропускаем быстрый regex, если в тексте есть день месяца («20 числа») —
-    # он не умеет отличать день от часа и хватает первое число как час.
-    m_rem = None if _DAY_OF_MONTH_MARK_RE.search(text) else _CLARIFY_REMINDER_RE.search(text)
-    if m_rem:
-        h = int(m_rem.group(1))
-        mi = int(m_rem.group(2)) if m_rem.group(2) else 0
-        run_dt = now.replace(hour=h, minute=mi, second=0, microsecond=0)
-        if run_dt <= now:
-            run_dt += timedelta(days=1)
-        dt_str = run_dt.strftime("%Y-%m-%dT%H:%M")
-        update_props["Напоминание"] = _date_with_tz(dt_str, tz_offset)
-        reschedule_reminder = (dt_str, page_id)
-        response_text = f"🔔 Напоминание: {run_dt.strftime('%d.%m в %H:%M')}"
+    # Существующие значения задачи — недостающую часть (дату или время)
+    # правка берёт оттуда, а не из «сегодня» (иначе «напоминание на 15 часов»
+    # теряет дату задачи).
+    page = None
+    try:
+        page = await _repo.retrieve_page(page_id)
+    except Exception as e:
+        logger.warning("handle_last_task_clarify: retrieve_page failed: %s", e)
+    old_rem_wall = _to_local_wall(page.reminder, tz_offset) if page and page.reminder else ""
+    old_dl_wall = _deadline_wall(page, tz_offset) if page else ""
 
-    elif _REMINDER_KW_RE.search(text):
-        # Быстрый regex не подошёл (день месяца, день недели и т.п.) — Haiku.
-        dt_str = await _haiku_parse_reminder_dt(text, tz_offset, tz_label)
+    # ── Напоминание ──────────────────────────────────────────────────────────────
+    if _REMINDER_KW_RE.search(text):
+        when = _parse_when(text, tz_offset, now)
+        dt_str = None
+        if when["date"] or when["time"]:
+            no_date_source = not when["date"] and not (old_rem_wall or old_dl_wall)
+            if no_date_source:
+                when["date"] = now.strftime("%Y-%m-%d")  # только время, дату взять неоткуда
+            dt_str = _merge_when(
+                when, old_rem_wall, old_dl_wall,
+                default_time=f"{DEFAULT_ALLDAY_REMINDER_HOUR:02d}:00",
+            )
+            if no_date_source and dt_str:
+                run_dt = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M")
+                if run_dt <= now.replace(tzinfo=None):  # прошло → ближайшее будущее
+                    dt_str = (run_dt + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        else:
+            # Детерминированно не разобрали — последний fallback на Haiku.
+            dt_str = await _haiku_parse_reminder_dt(text, tz_offset, tz_label)
         if dt_str:
             update_props["Напоминание"] = _date_with_tz(dt_str, tz_offset)
             reschedule_reminder = (dt_str, page_id)
-            run_dt = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M")
+            run_dt = datetime.strptime(dt_str[:16], "%Y-%m-%dT%H:%M") if "T" in dt_str \
+                else datetime.strptime(dt_str, "%Y-%m-%d")
             response_text = f"🔔 Напоминание: {run_dt.strftime('%d.%m в %H:%M')}"
 
     # ── Дедлайн ──────────────────────────────────────────────────────────────────
     elif _CLARIFY_DEADLINE_RE.search(text):
         m_dl = _CLARIFY_DEADLINE_RE.search(text)
         dl_raw = m_dl.group(1).strip()
-        iso_date = await _human_date_to_iso(dl_raw, uid)
+        when = _parse_when(dl_raw, tz_offset, now)
+        iso_date = None
+        if when["date"] or when["time"]:
+            iso_date = _merge_when(when, old_dl_wall)
+        else:
+            iso_date = await _human_date_to_iso(dl_raw, uid)
         if iso_date:
             update_props["Дедлайн"] = _date_with_tz(iso_date, tz_offset)
-            response_text = f"📅 Дедлайн: {iso_date}"
+            response_text = f"📅 Дедлайн: {iso_date.replace('T', ' ')}"
 
     # ── Категория ─────────────────────────────────────────────────────────────────
     elif _CLARIFY_CATEGORY_RE.search(text):
@@ -1297,7 +1355,7 @@ async def handle_last_task_clarify(
                 pass
             await _schedule_reminder(message.chat.id, title_str, dt_str, tid, tz_offset)
 
-        _last_task_del(uid)
+        _last_task_touch(uid)  # правка применилась → продлеваем окно (потолок 30 мин)
         sent = await message.answer(f"✏️ {response_text}")
         if reschedule_reminder:
             # Зарегистрировать эту плашку как «живое напоминание» задачи —
@@ -2806,7 +2864,7 @@ async def _do_save_task(message: Message, data: dict, chat_id: int = None, uid: 
 
     # Запоминаем последнюю созданную запись для контекстного редактирования
     last_record_set(uid, "task", result)
-    _last_task_set(uid, result)  # 5-мин окно для уточнений
+    _last_task_set(uid, result)  # окно для уточнений (TTL 10 мин, потолок 30)
 
     # Сохраняем поля повторения если задача повторяющаяся
     _repeat = data.get("repeat") or "Нет"
@@ -3024,6 +3082,51 @@ async def find_task_matches_for_finance(text: str, user_id: str, limit: int = 3)
             scored.append((score, t.id, title))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [(tid, title) for _, tid, title in scored[:limit]]
+
+
+_QUESTION_NOISE_RE = _re.compile(
+    r"\b(?:а|скажи|подскажи|стоит|есть|была|будет|висит|заведена|создана|поставлена|"
+    r"стояла|лежит|ли|у|меня|мне|задач\w*|напоминани\w*|напоминалк\w*|дедлайн\w*|"
+    r"про|по|о|об|такая|какая|вообще)\b",
+    _re.IGNORECASE,
+)
+
+
+async def handle_task_question(message: Message, text: str, user_id: str = "") -> None:
+    """Вопрос «стоит ли у меня задача X» → поиск по активным задачам.
+
+    Ничего не создаёт и не меняет: только отвечает списком найденного."""
+    uid = message.from_user.id
+    tz_offset = await _get_user_tz(uid)
+    query = _QUESTION_NOISE_RE.sub(" ", text or "").strip(" ?!.,")
+    hint_words = _hint_words(query)
+    if not hint_words:
+        await message.answer("🔍 Про какую задачу спрашиваешь? Назови пару слов из названия.")
+        return
+
+    tasks = await _repo.active(user_id=user_id)
+    scored = []
+    for t in tasks:
+        if not t.title:
+            continue
+        score = _task_score(t.title, hint_words)
+        if score > 0:
+            scored.append((score, t))
+    if not scored:
+        await message.answer(f"🔍 Среди активных задач не нашла: «{query[:60]}»")
+        return
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    lines = ["✅ Да, есть:"]
+    for _, t in scored[:5]:
+        parts = [f"• {t.title}"]
+        dl = _deadline_wall(t, tz_offset)
+        if dl:
+            parts.append(f"📅 {dl.replace('T', ' ')}")
+        if t.reminder:
+            parts.append(f"🔔 {_to_local_wall(t.reminder, tz_offset).replace('T', ' ')}")
+        lines.append(" · ".join(parts))
+    await message.answer("\n".join(lines))
 
 
 _CANCEL_STOP_WORDS = {

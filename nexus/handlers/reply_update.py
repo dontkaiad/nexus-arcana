@@ -113,6 +113,9 @@ async def handle_reply_update(message: Message, user_id: str = "") -> bool:
             from nexus.handlers.tasks import _get_user_tz
             tz_offset = await _get_user_tz(message.from_user.id)
         updates = await parse_reply(page_type, reply_text, tz_offset=tz_offset)
+        if page_type == "task":
+            from core.reply_update import merge_task_when_updates
+            updates = await merge_task_when_updates(page_id, updates, reply_text, tz_offset)
 
         # #188: «это в заметки» на плашку памяти — не field-апдейт, а перенос
         # в другой домен (архив факта + новая запись в 📝 Заметки). pop() ДО

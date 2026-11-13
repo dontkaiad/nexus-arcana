@@ -322,6 +322,58 @@ async def parse_reply(page_type: str, reply_text: str, tz_offset: int = 3) -> Di
     return {k: v for k, v in data.items() if v not in (None, "", [])}
 
 
+async def merge_task_when_updates(
+    page_id: str, updates: Dict[str, Any], reply_text: str, tz_offset: int = 3,
+) -> Dict[str, Any]:
+    """Детерминированно пересобрать deadline/reminder ответа LLM.
+
+    LLM не видит существующую задачу, поэтому «напоминание на 15 часов»
+    превращалось в сегодня 15:00 (дата задачи терялась). Если в updates ровно
+    одно из deadline/reminder и в reply_text есть дата и/или время — берём их
+    из parse_when, а недостающее (дату или время) — из задачи (merge_when).
+    Ничего не нашли / LLM поставила оба поля → updates без изменений.
+    """
+    from datetime import datetime, timedelta, timezone
+    from core.date_extract import parse_when, merge_when
+
+    keys = [k for k in ("deadline", "reminder") if updates.get(k)]
+    if len(keys) != 1:
+        return updates
+    when = parse_when(reply_text, tz_offset, datetime.now(timezone(timedelta(hours=tz_offset))))
+    if not (when["date"] or when["time"]):
+        return updates
+    try:
+        from nexus.repos.tasks_repo import _repo as _tasks_repo
+        from core.date_extract import dt_to_local_wall
+        task = await _tasks_repo.retrieve_page(page_id)
+    except Exception:
+        return updates
+    if not task:
+        return updates
+
+    def _wall(iso: str, all_day: bool = False) -> str:
+        if not iso or not isinstance(iso, str):
+            return ""
+        if all_day:
+            return iso[:10]
+        try:
+            dt = datetime.fromisoformat(iso)
+        except (ValueError, TypeError):
+            return ""
+        return dt_to_local_wall(dt, tz_offset)
+
+    old_rem = _wall(task.reminder)
+    old_dl = _wall(task.deadline, bool(getattr(task, "deadline_all_day", False)))
+    key = keys[0]
+    existing = (old_rem, old_dl) if key == "reminder" else (old_dl,)
+    merged = merge_when(when, *existing, default_time="10:00" if key == "reminder" else None)
+    if not merged:
+        return updates
+    out = dict(updates)
+    out[key] = merged.replace("T", " ")
+    return out
+
+
 async def apply_updates(
     page_id: str,
     page_type: str,
