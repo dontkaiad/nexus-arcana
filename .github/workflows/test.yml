@@ -5,6 +5,25 @@ on:
   pull_request:
     branches: [main]
 jobs:
+  frontend:
+    # Mini App: необъявленные идентификаторы (ReferenceError → пустой экран) и сборка.
+    # Деплой ждёт весь workflow «Tests», так что красный lint блокирует выкладку.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: miniapp/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: miniapp/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 20
