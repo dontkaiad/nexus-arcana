@@ -1,7 +1,8 @@
 """core/mcp_tasks.py — правила для создания и переноса задач из MCP (ADR-0039). Чистые функции, без обращений к базе.
 
 Что тут живёт: проверка заголовка, даты, времени и напоминания, выбор категории и приоритета из справочников,
-скользящий лимит «в сутки» в памяти процесса и тексты алертов. Маршруты (miniapp/backend/routes/mcp_tasks.py) только
+скользящий лимит «в сутки» в памяти процесса, пересечение задачи с бронями друзей (только чтение, ADR-0039 D2)
+и тексты алертов. Маршруты (miniapp/backend/routes/mcp_tasks.py) только
 собирают это вместе и пишут в базу.
 """
 from __future__ import annotations
@@ -10,8 +11,9 @@ import html
 import re
 import time
 from collections import deque
-from datetime import date, datetime, timedelta
-from typing import Callable, Deque, Iterable, Optional
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from typing import Callable, Deque, Iterable, List, Optional, Sequence
 
 CREATE_LIMIT_PER_DAY = 20
 RESCHEDULE_LIMIT_PER_DAY = 30
@@ -190,3 +192,67 @@ def alert_created(title: str, d: str, hhmm: Optional[str]) -> str:
 def alert_rescheduled(task_id: str, title: str, old: tuple, new: tuple) -> str:
     return (f"🤖 Claude перенёс задачу #{html.escape(str(task_id))} <b>{html.escape(title)}</b>: "
             f"было {html.escape(when_text(*old))}, стало {html.escape(when_text(*new))}")
+
+
+# ── пересечение с бронями друзей (только предупреждение, ничего не блокируется и не меняется) ─────────────────────
+
+# Длительность и «весь день» берутся из того же места, что и расчёт занятости Zarya (core/booking/busy.py), чтобы
+# предупреждение совпадало с тем, что увидят друзья в календаре записи: задача со временем занимает duration_min или
+# DEFAULT_BUSY_MINUTES (60), задача без времени весь локальный день в зоне показа (_DISPLAY_TZ, жёстко МСК).
+from core.booking.busy import DEFAULT_BUSY_MINUTES, _all_day_span  # noqa: E402
+from core.booking.tables import BLOCKING_BOOKING_STATUSES  # noqa: E402
+
+_UTC = timezone.utc
+
+
+@dataclass(frozen=True)
+class Conflict:
+    """Пересечение с бронью. name нужен только для алерта в закрытый топик: наружу (в ответ API и в kai-mcp) он не уходит."""
+    name: str
+    date: str
+    starts: str
+    ends: str
+
+    def public(self) -> dict:
+        """Единственный вид, который уходит в ответ: дата и время, без имени, id брони, контактов и темы."""
+        return {"date": self.date, "starts": self.starts, "ends": self.ends}
+
+
+def task_interval(d: date, hhmm: Optional[str], duration_min: Optional[int], tz_offset: int) -> tuple:
+    """[начало, конец) занятости задачи в UTC так, как её считает busy.py."""
+    if not hhmm:
+        return _all_day_span(datetime(d.year, d.month, d.day, tzinfo=_UTC))      # как в busy.py для deadline_all_day
+    h, m = hhmm.split(":")
+    start = datetime(d.year, d.month, d.day, int(h), int(m), tzinfo=timezone(timedelta(hours=tz_offset))).astimezone(_UTC)
+    return start, start + timedelta(minutes=duration_min or DEFAULT_BUSY_MINUTES)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=_UTC) if value.tzinfo is None else value.astimezone(_UTC)
+
+
+def find_conflicts(bookings: Iterable, start: datetime, end: datetime, now: datetime, tz_offset: int) -> List[Conflict]:
+    """Брони, которые держат слот (pending, confirmed), ещё не закончились и пересекаются с [start, end).
+    Пересечение строгое, как в busy.py: если конец брони равен началу задачи (или наоборот), это не пересечение."""
+    local = timezone(timedelta(hours=tz_offset))
+    found = []
+    for b in bookings:
+        if b.status not in BLOCKING_BOOKING_STATUSES:
+            continue                                                             # отменённые, завершённые и прочие слот не держат
+        bs, be = _as_utc(b.start_at), _as_utc(b.end_at)
+        if be <= now:
+            continue                                                             # прошедшие
+        if bs < end and be > start:
+            ls, le = bs.astimezone(local), be.astimezone(local)
+            found.append((bs, Conflict((b.requester_name or "").strip(), ls.date().isoformat(), ls.strftime("%H:%M"), le.strftime("%H:%M"))))
+    return [c for _, c in sorted(found, key=lambda x: x[0])]
+
+
+def alert_conflict(task_id: str, title: str, conflicts: Sequence[Conflict]) -> str:
+    """Имя друга попадает только сюда (закрытый топик лог-группы); название и имя экранируются для HTML."""
+    def one(c: Conflict) -> str:
+        return f"{html.escape(c.name or 'без имени')} {html.escape(c.date)} {html.escape(c.starts)}-{html.escape(c.ends)}"
+    head = f"⚠️ Задача #{html.escape(str(task_id))} <b>{html.escape(title)}</b> пересекается с "
+    if len(conflicts) == 1:
+        return head + f"бронью {one(conflicts[0])}, перенеси"
+    return head + "бронями: " + "; ".join(one(c) for c in conflicts) + ", перенеси"

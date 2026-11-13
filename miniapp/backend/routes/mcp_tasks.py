@@ -7,6 +7,10 @@
 затем напоминание в APScheduler, а если напоминания нет, дедлайн-пинг. Владелец всегда MCP_WRITE_OWNER_TG_ID, for_sitter
 ложь, повтора нет. Перенос меняет только срок (дата, время) и напоминание; название, заметку, статус и остальное эти маршруты
 не умеют менять, а удалять не умеют совсем (тело запроса с лишними полями отклоняется: extra=forbid).
+
+После записи (D2) маршруты только ЧИТАЮТ брони друзей через core.booking.repo.list_bookings: если время задачи пересекается
+с активной бронью, в ответе есть `conflicts` (дата, начало, конец: без имени, id и контактов), а в закрытый топик уходит
+предупреждение с именем. Задача при этом создаётся/переносится как обычно, брони и расчёт занятости Zarya не меняются.
 """
 from __future__ import annotations
 
@@ -103,6 +107,23 @@ async def _schedule(tg_id: int, title: str, task_id: str, tz_offset: int, *, rem
         logger.warning("mcp tasks: scheduling failed for %s: %s", (task_id or "?")[:8], e)
 
 
+async def _find_conflicts(user_id: str, tz_offset: int, d, hhmm: Optional[str], duration_min: Optional[int]):
+    """Только чтение. Список rules.Conflict или None, если брони прочитать не удалось (запись задачи от этого не зависит)."""
+    try:
+        from core.booking.repo import list_bookings
+        bookings = await list_bookings(user_id, statuses=rules.BLOCKING_BOOKING_STATUSES, upcoming_only=True)
+        start, end = rules.task_interval(d, hhmm, duration_min, tz_offset)
+        return rules.find_conflicts(bookings, start, end, datetime.now(timezone.utc), tz_offset)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("mcp tasks: booking overlap check failed: %s", e)
+        return None
+
+
+def _public(conflicts) -> Optional[list]:
+    """В ответ идут только дата и время; None значит «не удалось проверить»."""
+    return None if conflicts is None else [c.public() for c in conflicts]
+
+
 async def _alert(text: str) -> None:
     """В топик лог-группы тем же общим лог-ботом, что и остальные алерты. Не бросает."""
     try:
@@ -173,6 +194,9 @@ async def mcp_create_task(body: CreateBody, tg_id: int = Depends(current_user_id
     await _schedule(tg_id, title, task_id, tz_offset,
                     reminder_local=rem.strftime("%Y-%m-%dT%H:%M") if rem else None, deadline_local=deadline_local)
     await _alert(rules.alert_created(title, d.isoformat(), hhmm))
+    conflicts = await _find_conflicts(user_id, tz_offset, d, hhmm, None)
+    if conflicts:
+        await _alert(rules.alert_conflict(task_id, title, conflicts))
     return {
         "id": task_id,
         "title": title,
@@ -181,6 +205,7 @@ async def mcp_create_task(body: CreateBody, tg_id: int = Depends(current_user_id
         "reminder": rem.strftime("%Y-%m-%dT%H:%M") if rem else None,
         "prio": body.prio.replace("\ufe0f", ""),
         "category": category,
+        "conflicts": _public(conflicts),
     }
 
 
@@ -257,4 +282,7 @@ async def mcp_reschedule_task(
            "reminder": rem_final.strftime("%Y-%m-%dT%H:%M") if rem_final else None}
     await _alert(rules.alert_rescheduled(task_id, task.title,
                                           (old["deadline"], old["deadline_time"]), (new["deadline"], new["deadline_time"])))
-    return {"id": task_id, "title": task.title, "old": old, "new": new}
+    conflicts = await _find_conflicts(user_id, tz_offset, d, hhmm, task.duration_min)
+    if conflicts:
+        await _alert(rules.alert_conflict(task_id, task.title, conflicts))
+    return {"id": task_id, "title": task.title, "old": old, "new": new, "conflicts": _public(conflicts)}
