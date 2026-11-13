@@ -31,7 +31,7 @@ marker printed to stdout.**
   This is least-privilege: the Actions key cannot execute arbitrary commands on prod,
   only this one auditable script.
 
-- **`deploy.sh` (on the VPS, outside this repo):** performs `git pull origin main`,
+- **`deploy.sh` (runs on the VPS; versioned in the repo as `scripts/deploy.sh`):** performs `git pull origin main`,
   `docker compose up -d --build`, and `alembic upgrade head` (auto-migration baked in,
   not driven by Actions). Per the inline documentation in `deploy.yml`, the script uses
   `set -euo pipefail` and prints the literal string `deploy done` as its **final line,
@@ -46,7 +46,7 @@ marker printed to stdout.**
   actor, and a direct link to the Actions run into both Nexus and Arcana log threads.
   No alert on success — signal-to-noise.
 
-- **`deploy.sh` lives outside this repo** (on the VPS). The `script:` block in
+- **`deploy.sh` runs on the VPS; its source is `scripts/deploy.sh`** (the copy on the VPS is installed by hand). The `script:` block in
   `deploy.yml` is a placeholder ignored by the forced command — it is documented as
   such with a single comment pointing here (see §Consequences).
 
@@ -68,17 +68,14 @@ marker printed to stdout.**
 
 - Every push to `main` produces a deterministic, audited deploy with a marker-verified
   success signal and a Telegram alert on failure.
-- **`deploy.sh` is not version-controlled** — changes to it require a direct VPS edit
-  and are not tracked in git history. Accepted trade-off: the security boundary
-  (least-privilege key) outweighs auditability of the script itself on a
-  single-operator personal project.
+- **`deploy.sh` is versioned in the repo** (`scripts/deploy.sh`). The forced command still runs the copy in the deploy user's home, so a change
+  reaches the server only when that copy is replaced by hand (copy to a temporary file next to it, `bash -n`, then an atomic `mv`). The repo is the
+  reviewed source; the least-privilege boundary of the key is unchanged.
 - **Auto-migration (`alembic upgrade head`) runs on every deploy.** Fast forward path;
-  rollback requires manual `alembic downgrade` on the VPS. Acceptable for a personal
-  project; would need a pre-deploy backup step before a team deployment.
+  rollback requires manual `alembic downgrade` on the VPS or a restore from the pre-migration backup (next item).
+- **Pre-migration backup (implemented).** Right before `alembic upgrade head` the script runs `pg_dump -Fc` into a temporary file under `~/backups`
+  (directory mode 700, dump mode 600), checks free space, checks that the dump is non-empty and that `pg_restore -l` lists entries, only then renames
+  it to `nexus_arcana_<date>_<time>.dump` and keeps the last 7. Any failure stops the script before `alembic` and `docker compose up -d`.
 - **The `script:` block in `deploy.yml` is never executed.** It now contains a single
   comment pointing to this ADR, making the dead-code nature explicit rather than leaving
   realistic-looking shell that silently does nothing.
-- **Known risk (as of 2026-11-13):** `deploy.sh` lives on the VPS outside this repo and runs `alembic upgrade head` on every deploy **without a
-  backup**. On the local database a migration was found applied by hand without a row in `alembic_version`, so the same drift is possible on the server.
-  Needed: a `pg_dump` before `alembic upgrade head` in the script, and the script itself kept in the repo (the forced command can still call a copy).
-  Until then, check the server with `alembic current` and `alembic heads` after a deploy that adds migrations.

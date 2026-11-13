@@ -295,4 +295,6 @@ def test_response_is_not_cached_and_the_token_never_reaches_the_logs(caplog):
 
 
 def test_get_is_not_allowed_on_the_auto_route():
-    assert TestClient(app).get("/api/care/period/auto", headers=P).status_code in (401, 405)
+    # Маршрут только PUT. Без собранного фронта (CI) GET даёт 405; с dist (локально, в образе)
+    # SPA-маунт на «/» перехватывает путь и отвечает 404. Контракт один: GET не работает.
+    assert TestClient(app).get("/api/care/period/auto", headers=P).status_code in (401, 404, 405)

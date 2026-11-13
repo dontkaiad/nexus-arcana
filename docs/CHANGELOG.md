@@ -31,6 +31,7 @@ Lists vN.x, Memory vN.x).
 - `core/ru_morph.py` — падежный стеммер (вынесен из `core/memory`), общий с матчером имён долгов ([#136]).
 
 ### Changed
+- 🚀 Деплой: `scripts/deploy.sh` лежит в репо, перед `alembic upgrade head` проверяемый `pg_dump` в `~/backups` (последние 7), при сбое деплой останавливается; ставится на VPS вручную; кейс 0014.
 - 🧰 CI: ESLint (`no-undef`, `react/jsx-no-undef`) и job `frontend` (`npm run lint` + build) в `.github/workflows/test.yml`.
 - 💰 Цели вынесены из `memories` в таблицу `goals` (миграция `a1b2c3d4e5f6`, backfill из `цель_*` фактов) — как долги в `debts`; `цель_` диверсится на записи ([#205]).
 - 📅 Календарь Nexus: page-title, ровный ритм блоков, единый цветовой словарь сетки месяца, читаемая карточка «сегодня» в Неделе (плотный фон вместо стекла) ([#50]).
@@ -67,7 +68,6 @@ Lists vN.x, Memory vN.x).
 
 ### Known issues
 - `tests/test_care_period_auto.py::test_get_is_not_allowed_on_the_auto_route` падает (404 вместо 401/405), не разобрано.
-- Известный риск деплоя: `deploy.sh` на VPS вне репо, `alembic upgrade head` без бэкапа; см. кейс 0014.
 
 ## [Lists v1.2.5 / Memory v1.2.4] — 2026-05-08
 
