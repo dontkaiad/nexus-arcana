@@ -29,8 +29,12 @@ docker buildx build --provenance=false --sbom=false --load \
 umask 077
 BACKUP_DIR="$HOME/backups"
 BACKUP_KEEP=7
-mkdir -p "$BACKUP_DIR"
-chmod 700 "$BACKUP_DIR"
+# ~/backups is shared with cron dumps and manual snapshots: an existing
+# directory keeps its mode and content, only a directory created here gets 700.
+if [ ! -d "$BACKUP_DIR" ]; then
+  mkdir -p "$BACKUP_DIR"
+  chmod 700 "$BACKUP_DIR"
+fi
 
 DB_BYTES=$(docker exec nexus-arcana-db psql -U kai -d nexus_arcana -Atc "SELECT pg_database_size(current_database())")
 FREE_BYTES=$(df --output=avail -B1 "$BACKUP_DIR" | tail -n 1 | tr -d ' ')
@@ -41,7 +45,7 @@ if [ "$FREE_BYTES" -lt "$NEED_BYTES" ]; then
 fi
 
 BACKUP_TS=$(date +%F_%H%M%S)
-BACKUP_TMP=$(mktemp "$BACKUP_DIR/.nexus_arcana_${BACKUP_TS}.XXXXXX")
+BACKUP_TMP=$(mktemp "$BACKUP_DIR/.predeploy_nexus_arcana_${BACKUP_TS}.XXXXXX")
 trap 'rm -f "$BACKUP_TMP"' EXIT
 if ! docker exec nexus-arcana-db pg_dump -U kai -d nexus_arcana -Fc > "$BACKUP_TMP"; then
   echo "backup aborted: pg_dump failed" >&2
@@ -58,12 +62,13 @@ if [ "$BACKUP_ENTRIES" -lt 1 ]; then
   echo "backup aborted: pg_restore -l shows no entries" >&2
   exit 1
 fi
-BACKUP_FILE="$BACKUP_DIR/nexus_arcana_${BACKUP_TS}.dump"
+BACKUP_FILE="$BACKUP_DIR/predeploy_nexus_arcana_${BACKUP_TS}.dump"
 chmod 600 "$BACKUP_TMP"
 mv "$BACKUP_TMP" "$BACKUP_FILE"
 trap - EXIT
 echo "backup ok: $BACKUP_FILE ($BACKUP_ENTRIES entries)"
-ls -1t "$BACKUP_DIR"/nexus_arcana_*.dump | tail -n +$(( BACKUP_KEEP + 1 )) | xargs -r rm -f --
+# Rotation touches ONLY predeploy_nexus_arcana_*.dump (cron nexus_arcana_*, pre_*, auth_*, santa_* stay).
+ls -1t "$BACKUP_DIR"/predeploy_nexus_arcana_*.dump | tail -n +$(( BACKUP_KEEP + 1 )) | xargs -r rm -f --
 
 docker compose run --rm nexus alembic upgrade head
 docker compose up -d
