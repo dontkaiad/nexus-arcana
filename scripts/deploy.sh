@@ -23,6 +23,48 @@ ZSHA=$(git log -1 --format=%h -- $(cat zarya/build-inputs.txt))
 docker buildx build --provenance=false --sbom=false --load \
   --build-arg GIT_SHA="$ZSHA" -f zarya/Dockerfile -t zarya-bot:latest .
 
+# Pre-migration backup (ADR-0014). Every failure below stops the deploy before
+# alembic and before `docker compose up -d`: set -e plus explicit checks, no
+# pipe or redirect hides an exit code.
+umask 077
+BACKUP_DIR="$HOME/backups"
+BACKUP_KEEP=7
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+
+DB_BYTES=$(docker exec nexus-arcana-db psql -U kai -d nexus_arcana -Atc "SELECT pg_database_size(current_database())")
+FREE_BYTES=$(df --output=avail -B1 "$BACKUP_DIR" | tail -n 1 | tr -d ' ')
+NEED_BYTES=$(( DB_BYTES + 268435456 ))
+if [ "$FREE_BYTES" -lt "$NEED_BYTES" ]; then
+  echo "backup aborted: free $FREE_BYTES bytes, need $NEED_BYTES" >&2
+  exit 1
+fi
+
+BACKUP_TS=$(date +%F_%H%M%S)
+BACKUP_TMP=$(mktemp "$BACKUP_DIR/.nexus_arcana_${BACKUP_TS}.XXXXXX")
+trap 'rm -f "$BACKUP_TMP"' EXIT
+if ! docker exec nexus-arcana-db pg_dump -U kai -d nexus_arcana -Fc > "$BACKUP_TMP"; then
+  echo "backup aborted: pg_dump failed" >&2
+  exit 1
+fi
+if [ ! -s "$BACKUP_TMP" ]; then
+  echo "backup aborted: dump is empty" >&2
+  exit 1
+fi
+if ! BACKUP_ENTRIES=$(docker exec -i nexus-arcana-db pg_restore -l < "$BACKUP_TMP" | grep -c '^[0-9][0-9]*;'); then
+  BACKUP_ENTRIES=0
+fi
+if [ "$BACKUP_ENTRIES" -lt 1 ]; then
+  echo "backup aborted: pg_restore -l shows no entries" >&2
+  exit 1
+fi
+BACKUP_FILE="$BACKUP_DIR/nexus_arcana_${BACKUP_TS}.dump"
+chmod 600 "$BACKUP_TMP"
+mv "$BACKUP_TMP" "$BACKUP_FILE"
+trap - EXIT
+echo "backup ok: $BACKUP_FILE ($BACKUP_ENTRIES entries)"
+ls -1t "$BACKUP_DIR"/nexus_arcana_*.dump | tail -n +$(( BACKUP_KEEP + 1 )) | xargs -r rm -f --
+
 docker compose run --rm nexus alembic upgrade head
 docker compose up -d
 echo "deploy done: $(date -u +%FT%TZ)"
