@@ -385,7 +385,7 @@ async def task_edit(
         # с явным offset'ом, чтобы _parse_iso не гадал.
         deadline_hhmm = body.deadline_time
         if not deadline_hhmm and task.deadline:
-            deadline_hhmm = extract_time(task.deadline, tz_offset)
+            deadline_hhmm = extract_time(task.deadline, tz_offset, bool(getattr(task, "deadline_all_day", False)))
         deadline_hhmm = deadline_hhmm or "09:00"
         try:
             dl_h, dl_m = deadline_hhmm.split(":")
