@@ -75,7 +75,8 @@ marker printed to stdout.**
   rollback requires manual `alembic downgrade` on the VPS or a restore from the pre-migration backup (next item).
 - **Pre-migration backup (implemented).** Right before `alembic upgrade head` the script runs `pg_dump -Fc` into a temporary file under `~/backups`
   (directory mode 700, dump mode 600), checks free space, checks that the dump is non-empty and that `pg_restore -l` lists entries, only then renames
-  it to `nexus_arcana_<date>_<time>.dump` and keeps the last 7. Any failure stops the script before `alembic` and `docker compose up -d`.
+  it to `predeploy_nexus_arcana_<date>_<time>.dump` and keeps the last 7 of **that prefix only**; the shared directory (cron dumps, manual snapshots)
+  keeps its mode and content, only a directory created by the script gets mode 700. Any failure stops the script before `alembic` and `docker compose up -d`.
 - **The `script:` block in `deploy.yml` is never executed.** It now contains a single
   comment pointing to this ADR, making the dead-code nature explicit rather than leaving
   realistic-looking shell that silently does nothing.
