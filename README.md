@@ -53,6 +53,16 @@ On a synthetic set, memory retrieval went **72% → 100% recall@5** by understan
 
 ![evals](https://img.shields.io/badge/evals%20%28offline%2C%20synthetic%29-recall%405%20100%25%20%C2%B7%20grounding%20100%25%20%C2%B7%20classifier%20100%25-brightgreen)
 
+| What changed | Data | Metric | Before → after |
+|---|---|---|---|
+| Understand the question before searching (ILIKE → hybrid FTS+RRF → + understanding) | synthetic, 9 questions | recall@5 | 72.2% → 86.1% → **100%** |
+| Search by cat, not only by person | synthetic, 19 questions | recall@5 · route accuracy | 78.9% → **100%** · 68.4% → **100%** |
+| Grounding validator for generated answers | 13 synthetic cases, honest and invented | accept · reject recall | **100%** · **100%** |
+| Classifier Haiku 4.5 → 5.5 | 33 LLM-path messages, synthetic | type agreement · cost per 1k messages | 93.9–100% · **$2.2 → $0.27** |
+| Prompt cache on the classifier | 14,252-token system prompt | latency of the 2nd call | 948 → **698 ms** |
+
+Synthetic sets are small by design: read them as "the machinery works and regressions are caught", not as quality claims.
+
 → [docs/EVALS.md](docs/EVALS.md) · [ADR-0030](docs/CASES/0030-evals.md) · [why memory RAG "did not work"](docs/CASES/0031-why-memory-rag-failed.md)
 
 ### Vector semantic recall
