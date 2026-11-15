@@ -58,19 +58,36 @@ jobs:
       - name: Offline evals (synthetic; classifier / retrieval recall@5 / grounding)
         run: python -m evals offline
 
-      - name: Notify Telegram on failure
-        # Только push в main (там блокируется деплой); PR-ранов не спамим.
+      # Сообщения в ops-группу: общий action (dontkaiad/ops-notify, копия heylark-infra/ops; репозиторий
+      # публичный, приватный оригинал из него недоступен), закреплён по SHA. Топик берётся из его topics.env,
+      # токен и chat id передаются входами, не подставляются в скрипт. Только push в main (там блокируется
+      # деплой); PR-ранов не спамим. Тесты упали: деплой не запущен, это касается всех трёх ботов.
+      - name: Notify nexus (tests failed)
         if: failure() && github.event_name == 'push'
-        run: |
-          send() {
-            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_LOG_BOT_TOKEN }}/sendMessage" \
-              --data-urlencode "chat_id=${{ secrets.TG_LOG_CHAT_ID }}" \
-              --data-urlencode "message_thread_id=$1" \
-              --data-urlencode "parse_mode=HTML" \
-              --data-urlencode "text=❌ <b>Тесты упали — деплой не запущен</b>
-          commit: <code>${{ github.sha }}</code>
-          автор: ${{ github.actor }}
-          <a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">открыть run</a>"
-          }
-          send "${{ secrets.TG_LOG_THREAD_NEXUS }}"
-          send "${{ secrets.TG_LOG_THREAD_ARCANA }}"
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: nexus
+          kind: deploy_fail
+          title: tests failed, deploy not started
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify arcana (tests failed)
+        if: failure() && github.event_name == 'push'
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: arcana
+          kind: deploy_fail
+          title: tests failed, deploy not started
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify zarya (tests failed)
+        if: failure() && github.event_name == 'push'
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: zarya
+          kind: deploy_fail
+          title: tests failed, deploy not started
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}

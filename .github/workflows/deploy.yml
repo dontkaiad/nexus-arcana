@@ -15,6 +15,35 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      # Нужен только для шага plan: какие файлы изменил деплоимый коммит (main сквош-мерджится, один
+      # коммит на деплой). Код не исполняется, токен в репозитории не остаётся.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Which bots does this commit touch
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          files="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
+          nexus=false; arcana=false; zarya=false; note=""
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "$files" ]; then
+            nexus=true; arcana=true; zarya=true; note="manual redeploy / all bots"
+          elif grep -qE '^(core/|alembic/|alembic\.ini|docker/|Dockerfile|docker-compose\.yml|requirements|scripts/deploy\.sh|zarya/build-inputs\.txt)' <<<"$files"; then
+            nexus=true; arcana=true; zarya=true; note="shared code: all bots"
+          else
+            grep -qE '^(nexus/|miniapp/)' <<<"$files" && nexus=true
+            grep -qE '^arcana/' <<<"$files" && arcana=true
+            grep -qE '^zarya/' <<<"$files" && zarya=true
+            if [ "$nexus$arcana$zarya" = falsefalsefalse ]; then
+              nexus=true; note="no bot code changed (docs, tests, CI)"
+            fi
+          fi
+          { echo "nexus=$nexus"; echo "arcana=$arcana"; echo "zarya=$zarya"; echo "note=$note"; } >> "$GITHUB_OUTPUT"
+
       - name: Deploy over SSH
         id: deploy
         uses: appleboy/ssh-action@v1.2.5
@@ -41,18 +70,65 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -q "deploy done" || { echo "marker missing — deploy failed"; exit 1; }
 
-      - name: Notify Telegram on failure
+      # Сообщения в ops-группу через dontkaiad/ops-notify (копия heylark-infra/ops, закреплена по SHA;
+      # репозиторий публичный). Топик по боту берётся из её topics.env; токен и chat id передаются
+      # входами. Успех: по изменённым путям (см. шаг plan). Падение: во все три топика, деплой общий.
+      - name: Notify nexus (deploy ok)
+        if: success() && steps.plan.outputs.nexus == 'true'
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: nexus
+          kind: deploy_ok
+          body: ${{ steps.plan.outputs.note }}
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify arcana (deploy ok)
+        if: success() && steps.plan.outputs.arcana == 'true'
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: arcana
+          kind: deploy_ok
+          body: ${{ steps.plan.outputs.note }}
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify zarya (deploy ok)
+        if: success() && steps.plan.outputs.zarya == 'true'
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: zarya
+          kind: deploy_ok
+          body: ${{ steps.plan.outputs.note }}
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify nexus (deploy failed)
         if: failure()
-        run: |
-          send() {
-            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_LOG_BOT_TOKEN }}/sendMessage" \
-              --data-urlencode "chat_id=${{ secrets.TG_LOG_CHAT_ID }}" \
-              --data-urlencode "message_thread_id=$1" \
-              --data-urlencode "parse_mode=HTML" \
-              --data-urlencode "text=❌ <b>Деплой упал</b>
-          commit: <code>${{ github.sha }}</code>
-          автор: ${{ github.actor }}
-          <a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\">открыть run</a>"
-          }
-          send "${{ secrets.TG_LOG_THREAD_NEXUS }}"
-          send "${{ secrets.TG_LOG_THREAD_ARCANA }}"
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: nexus
+          kind: deploy_fail
+          title: Deploy over SSH (details in the run log)
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify arcana (deploy failed)
+        if: failure()
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: arcana
+          kind: deploy_fail
+          title: Deploy over SSH (details in the run log)
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+
+      - name: Notify zarya (deploy failed)
+        if: failure()
+        uses: dontkaiad/ops-notify@8e673e29a5027518a99de11c33ba4034a3eb1b57 # v1
+        with:
+          project: zarya
+          kind: deploy_fail
+          title: Deploy over SSH (details in the run log)
+          token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+          chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
