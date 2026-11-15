@@ -602,8 +602,9 @@ def test_alerts_say_what_happened_and_hold_nothing_extra(env):
     create({"title": "Алерт <тест>".replace("<", "").replace(">", ""), "deadline_date": day(3), "deadline_time": "10:00"})
     resched(tid, {"deadline_date": day(5), "deadline_time": "16:30"})
     created, moved = (c.args[0] for c in env.alert.await_args_list)
-    assert created == f"🤖 Claude создал задачу: <b>Алерт тест</b>, срок {day(3)} 10:00"
-    assert moved == f"🤖 Claude перенёс задачу #{tid} <b>Позвонить маме</b>: было {day(2)} 15:00, стало {day(5)} 16:30"
+    head = "🤖 <b>🔌 kai-mcp</b> · claude\n"          # шапка шаблона ops-группы, метка Claude без изменений
+    assert created == head + f"🤖 Claude создал задачу: <b>Алерт тест</b>, срок {day(3)} 10:00"
+    assert moved == head + f"🤖 Claude перенёс задачу #{tid} <b>Позвонить маме</b>: было {day(2)} 15:00, стало {day(5)} 16:30"
     for text in (created, moved):
         for secret in (TOKEN_W, TOKEN_R, MARK, str(OWNER), "Bearer", "заметка владельца", "user_id"):
             assert secret not in text

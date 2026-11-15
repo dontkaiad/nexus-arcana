@@ -127,7 +127,9 @@ def _public(conflicts) -> Optional[list]:
 async def _alert(text: str) -> None:
     """В топик лог-группы тем же общим лог-ботом, что и остальные алерты. Не бросает."""
     try:
-        await notify_log_group(text, config.log_thread_kaimcp or config.log_thread_nexus)
+        from core.ops_alert import format_event   # шапка шаблона ops-группы; текст метки Claude без изменений
+        await notify_log_group(format_event("kai-mcp", "🤖", "claude", text),
+                               config.log_thread_kaimcp or config.log_thread_nexus)
     except Exception as e:  # noqa: BLE001
         logger.warning("mcp tasks: alert failed: %s", e)
 

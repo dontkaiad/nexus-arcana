@@ -104,6 +104,14 @@ async def _send_alert(kind: str) -> None:
     text = _alert_text(kind)
     for tg_id in config.allowed_ids:                 # все аккаунты владельца (см. память: два tg_id на один user_id)
         await notify_user(tg_id, text, bot="nexus")
+    # и в топик Nexus лог-группы по шаблону (то же событие, тот же дроссель раз в 6 ч); без текста запроса
+    try:
+        from core import ops_alert
+        title = "Anthropic: кончились кредиты, LLM не работает" if kind == "billing" \
+            else "Anthropic: ключ отклонён (auth), LLM не работает"
+        await ops_alert.send_alert("nexus", "🔴", "error", title, "проверь баланс и ключ в консоли Anthropic")
+    except Exception:  # noqa: BLE001
+        logger.warning("llm_health: алерт в топик не отправлен", exc_info=True)
 
 
 def _schedule_alert(kind: str) -> None:

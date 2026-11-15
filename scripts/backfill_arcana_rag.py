@@ -1,4 +1,4 @@
-"""scripts/backfill_arcana_rag.py — индексация всех существующих триплетов в Qdrant.
+"""scripts/backfill_arcana_rag.py — индексация всех существующих триплетов в pgvector (таблица RAG в основной БД).
 
 Батч-режим (#166): собираем тексты всех триплетов и эмбедим ПАЧКАМИ — один
 запрос Voyage на чанк вместо N запросов (критично под бесплатный лимит 3 RPM).
@@ -9,8 +9,8 @@ Voyage принимает до 1000 текстов на запрос; чанку
 
     python -m scripts.backfill_arcana_rag
 
-Требует поднятых Qdrant (коллекция arcana_triplets) и VOYAGE_API_KEY — иначе
-index_triplets_batch graceful-no-op'ит (вернёт 0).
+Требует VOYAGE_API_KEY и БД с расширением pgvector (core.rag, см. ADR-0006; Qdrant больше не
+используется: Arcana ушла на pgvector) — иначе index_triplets_batch graceful-no-op'ит (вернёт 0).
 """
 from __future__ import annotations
 

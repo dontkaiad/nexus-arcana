@@ -131,15 +131,35 @@ async def test_log_error_routes_by_bot_label():
         await error_log.log_error("boom-a", "parse_error", bot_label="🌒 Arcana")
 
     assert calls[0]["thread"] == "111"          # Nexus → свой топик
-    assert "Nexus" in calls[0]["text"]
-    assert "boom-n" in calls[0]["text"]
+    assert "<b>☀️ nexus</b>" in calls[0]["text"]
+    assert "boom-n" not in calls[0]["text"]     # текст пользователя в алерт не идёт (только в логи контейнера)
     assert calls[1]["thread"] == "222"          # Arcana → свой топик
-    assert "Arcana" in calls[1]["text"]
+    assert "<b>🌒 arcana</b>" in calls[1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_log_error_routes_zarya_to_the_booking_topic():
+    """Заря на общем обработчике: метка ⭐ zarya и топик букинга (1182)."""
+    from core import error_log, bot_notify
+    calls: list = []
+
+    async def _fake_send(text, thread_id=""):
+        calls.append({"text": text, "thread": thread_id})
+        return True
+
+    with patch.object(error_log.config, "log_thread_nexus", "111"), \
+         patch.object(error_log.config, "log_thread_booking", "1182"), \
+         patch.object(bot_notify, "notify_log_group", _fake_send):
+        await error_log.log_error("boom-z", "processing_error", bot_label="⭐ Zarya", context="handle_booking")
+
+    assert calls[0]["thread"] == "1182"
+    assert "<b>⭐ zarya</b>" in calls[0]["text"] and "handle_booking" in calls[0]["text"]
+    assert "boom-z" not in calls[0]["text"]
 
 
 @pytest.mark.asyncio
 async def test_log_error_html_escapes_payload():
-    """Пользовательский текст экранируется — не ломает parse_mode=HTML."""
+    """Сообщение пользователя в алерт не попадает вовсе; то, что попадает (тип, контекст), экранируется."""
     from core import error_log, bot_notify
     sent: dict = {}
 
@@ -148,9 +168,9 @@ async def test_log_error_html_escapes_payload():
         return True
 
     with patch.object(bot_notify, "notify_log_group", _fake_send):
-        await error_log.log_error("<script>x</script>", "processing_error")
-    assert "<script>" not in sent["text"]
-    assert "&lt;script&gt;" in sent["text"]
+        await error_log.log_error("<script>x</script>", "processing_error<b>", context="ctx<i>")
+    assert "script" not in sent["text"]
+    assert "<b>x" not in sent["text"] and "&lt;b&gt;" in sent["text"] and "ctx&lt;i&gt;" in sent["text"]
 
 
 @pytest.mark.asyncio
@@ -166,39 +186,12 @@ async def test_log_error_never_raises_on_send_failure():
     assert ok is True  # log_error всё равно вернул True
 
 
-# ── notify_startup (стартовый пинг «поднялся») ───────────────────────────────
+# ── стартовый пинг «поднялся» убран: деплой сообщает CI, падение сообщает host-монитор ────────────
 
-@pytest.mark.asyncio
-async def test_notify_startup_routes_per_bot():
-    """nexus → log_thread_nexus, arcana → log_thread_arcana."""
+def test_startup_ping_is_gone_from_bot_notify():
     from core import bot_notify
-    calls: list = []
-
-    async def _fake_send(text, thread_id=""):
-        calls.append({"text": text, "thread": thread_id})
-        return True
-
-    with patch.object(bot_notify.config, "log_thread_nexus", "111"), \
-         patch.object(bot_notify.config, "log_thread_arcana", "222"), \
-         patch.object(bot_notify, "notify_log_group", _fake_send):
-        await bot_notify.notify_startup("nexus")
-        await bot_notify.notify_startup("arcana")
-
-    assert calls[0]["thread"] == "111"
-    assert "Nexus" in calls[0]["text"]
-    assert "поднялся" in calls[0]["text"]
-    assert calls[1]["thread"] == "222"
-    assert "Arcana" in calls[1]["text"]
-
-
-@pytest.mark.asyncio
-async def test_notify_startup_disabled_when_no_token_does_not_raise():
-    """Без TG_LOG_BOT_TOKEN старт проходит: notify_startup no-op → False, не падает."""
-    from core import bot_notify
-    with patch.object(bot_notify.config, "log_bot_token", ""), \
-         patch.object(bot_notify.config, "log_chat_id", ""):
-        ok = await bot_notify.notify_startup("nexus")
-    assert ok is False
+    assert not hasattr(bot_notify, "notify_startup")
+    assert callable(bot_notify.log_version)        # версия по-прежнему пишется в лог контейнера
 
 
 # ── StructuredErrorHandler → мост непойманных исключений в группу ─────────────
@@ -239,8 +232,9 @@ async def test_uncaught_exception_mirrors_to_group():
 
     assert len(sent) == 1
     assert sent[0]["thread"] == "111"          # роутинг по self.bot_label
-    assert "Nexus" in sent[0]["text"]
+    assert "<b>☀️ nexus</b>" in sent[0]["text"]
     assert "uncaught" in sent[0]["text"]
+    assert "ValueError" in sent[0]["text"] and "kaboom" not in sent[0]["text"]   # класс да, текст исключения нет
 
 
 @pytest.mark.asyncio
@@ -261,7 +255,7 @@ async def test_uncaught_arcana_routes_to_arcana_thread():
         await asyncio.sleep(0.02)
 
     assert sent[0]["thread"] == "222"
-    assert "Arcana" in sent[0]["text"]
+    assert "<b>🌒 arcana</b>" in sent[0]["text"]
 
 
 @pytest.mark.asyncio

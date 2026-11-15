@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
 from core.config import config
 from core.middleware import LlmNoticeMiddleware, WhitelistMiddleware
-from core.bot_notify import notify_startup
+from core.bot_notify import log_version
 from core.heartbeat import start_heartbeat
 from arcana.handlers.base import router
 from arcana.handlers.memory import router as memory_router
@@ -197,13 +197,15 @@ def create_dp_and_bot():
         # Escape делаем ПОСЛЕ split (per-chunk), иначе можно порвать HTML-entity.
         try:
             from core.bot_notify import notify_log_group
+            from core.ops_alert import format_event
             from core.tg_send import split_text
             from html import escape as _esc
             chunks = split_text(text, limit=3500)
             for _i, _ch in enumerate(chunks):
-                _prefix = "🎤 транскрипт:" if _i == 0 else "🎤 …продолжение:"
+                _prefix = "транскрипт:" if _i == 0 else "…продолжение:"
+                # шапка шаблона ops-группы; сам транскрипт целиком и без изменений (решение владелицы)
                 await notify_log_group(
-                    f"{_prefix} {_esc(_ch)}", config.log_thread_arcana,
+                    format_event("arcana", "🎤", "voice", f"{_prefix} {_esc(_ch)}"), config.log_thread_arcana,
                 )
         except Exception as e:
             logger.warning("voice transcript log to group failed: %s", e)
@@ -482,7 +484,7 @@ async def main():
         logger.warning("apscheduler not installed — monthly reminder disabled")
 
     async def _on_startup(**kwargs) -> None:
-        await notify_startup("arcana")  # стартовый пинг в лог-группу (fail-safe)
+        log_version("arcana")  # без пинга в группу: деплой сообщает CI, падение сообщает host-монитор
         start_heartbeat()  # фоновый heartbeat для docker healthcheck
 
     dp.startup.register(_on_startup)

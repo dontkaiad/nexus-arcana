@@ -17,6 +17,11 @@ logging.basicConfig(
 from core.log_setup import quiet_http_loggers  # noqa: E402
 
 quiet_http_loggers()  # токен бота в URL httpx (#268)
+# Общий обработчик ошибок (как у Nexus и Arcana): непойманные ERROR+ идут в топик Зари (1182) по шаблону
+# ops-группы с меткой ⭐ zarya, транзиентные сбои Telegram только считаются.
+from core.logging_notion import install as _install_notion_logging  # noqa: E402
+
+_install_notion_logging(bot_label="⭐ Zarya")
 logger = logging.getLogger("zarya.bot")
 
 
@@ -34,15 +39,15 @@ async def _on_startup(**kwargs) -> None:
     except Exception as e:
         logger.warning("booking reminder restore failed: %s", e)
     try:
-        from core.bot_notify import notify_startup
-        await notify_startup("zarya")
+        from core.bot_notify import log_version
+        log_version("zarya")   # только строка в логе: деплой сообщает CI, падение сообщает host-монитор
     except Exception as e:
-        logger.warning("startup ping failed: %s", e)
+        logger.warning("version log failed: %s", e)
 
 
 def _write_build_stamp() -> None:
     """Runtime version stamp (no Docker layer — see zarya/Dockerfile note).
-    `core.bot_notify._version_stamp()` reads /app/BUILD_STAMP for the «поднялся» ping."""
+    `core.bot_notify._version_stamp()` reads /app/BUILD_STAMP (the version for the logs)."""
     try:
         from datetime import datetime, timezone
         with open("/app/BUILD_STAMP", "w", encoding="utf-8") as f:

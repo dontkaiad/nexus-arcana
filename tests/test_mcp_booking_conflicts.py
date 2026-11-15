@@ -202,8 +202,9 @@ def test_the_alert_names_the_friend_but_not_the_contact_or_the_topic(env):
     make_booking(at(3, 10, 0), at(3, 11, 0))
     out = new_task("10:00")
     alerts = [c.args[0] for c in env.alert.await_args_list]
-    assert len(alerts) == 2 and alerts[0].startswith("🤖 Claude создал задачу")
-    assert alerts[1] == f"⚠️ Задача #{out['id']} <b>Проверка брони</b> пересекается с бронью {NAME} {day(3)} 10:00-11:00, перенеси"
+    head = "🤖 <b>🔌 kai-mcp</b> · claude\n"          # шапка шаблона ops-группы, метка Claude без изменений
+    assert len(alerts) == 2 and alerts[0].startswith(head + "🤖 Claude создал задачу")
+    assert alerts[1] == head + f"⚠️ Задача #{out['id']} <b>Проверка брони</b> пересекается с бронью {NAME} {day(3)} 10:00-11:00, перенеси"
     for text in alerts:
         assert CONTACT not in text and NOTE not in text and "example.test" not in text
     from core.config import config
@@ -223,7 +224,7 @@ def test_the_reschedule_alert_has_the_task_id_and_title(env):
     make_booking(at(5, 10, 0), at(5, 11, 0))
     tid = timed_task(deadline=aware(day(1), 15, 0), reminder=None, title="Позвонить <b>маме</b>".replace("<b>", "").replace("</b>", ""))
     resched(tid, {"deadline_date": day(5), "deadline_time": "10:00"})
-    assert env.alert.await_args_list[-1].args[0] == f"⚠️ Задача #{tid} <b>Позвонить маме</b> пересекается с бронью {NAME} {day(5)} 10:00-11:00, перенеси"
+    assert env.alert.await_args_list[-1].args[0] == "🤖 <b>🔌 kai-mcp</b> · claude\n" + f"⚠️ Задача #{tid} <b>Позвонить маме</b> пересекается с бронью {NAME} {day(5)} 10:00-11:00, перенеси"
 
 
 def test_no_warning_alert_when_nothing_overlaps(env):

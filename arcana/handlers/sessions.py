@@ -1187,8 +1187,10 @@ async def handle_add_session(
                 f"{b}→{a}" for b, a in zip(_gr_before, _flat_cards(data)) if b != a
             ]
             from core.bot_notify import notify_log_group
-            _gr_msg = "🔍 карты: " + ("; ".join(_gr_diff) if _gr_diff else "без замен")
-            await notify_log_group(html.escape(_gr_msg[:1500]), _cfg.log_thread_arcana)
+            from core.ops_alert import format_event
+            _gr_msg = "карты: " + ("; ".join(_gr_diff) if _gr_diff else "без замен")
+            await notify_log_group(
+                format_event("arcana", "🔍", "grounding", html.escape(_gr_msg[:1500])), _cfg.log_thread_arcana)
         except Exception as _e:
             logger.warning("grounding ops-log failed: %s", _e)
 

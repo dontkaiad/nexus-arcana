@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 import logging
-import socket
 from datetime import datetime, timezone
 from html import escape as _esc
+from typing import Optional
 
 import httpx
 
@@ -22,6 +22,7 @@ logger = logging.getLogger("bot_notify")
 
 _API = "https://api.telegram.org/bot{token}/sendMessage"
 _EDIT_API = "https://api.telegram.org/bot{token}/editMessageText"
+_LOG_TIMEOUT = 5.0      # сек на один sendMessage в лог-группу (scripts/ops_test.py на время проверки ставит больше)
 
 
 def _token_for(bot: str) -> str:
@@ -62,7 +63,42 @@ async def notify_user(tg_id: int, text: str, bot: str = "nexus") -> bool:
         return False
 
 
-async def notify_log_group(text: str, thread_id: str = "") -> bool:
+async def _send_log(text: str, thread_id: str = "", *, silent: bool = False) -> Optional[int]:
+    """Один sendMessage в лог-группу. Возвращает message_id, если Telegram принял, иначе None. Не бросает.
+    В лог при сбое идёт только класс исключения: текст httpx-ошибки содержит URL, а в нём токен бота."""
+    token = config.log_bot_token
+    chat_id = config.log_chat_id
+    if not token or not chat_id:
+        return None
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if silent:
+        payload["disable_notification"] = True
+    if thread_id:
+        try:
+            payload["message_thread_id"] = int(thread_id)
+        except (TypeError, ValueError):
+            pass
+    try:
+        async with httpx.AsyncClient(timeout=_LOG_TIMEOUT) as client:
+            resp = await client.post(_API.format(token=token), json=payload)
+        if resp.status_code != 200:
+            logger.warning("notify_log_group: %s %s", resp.status_code, resp.text[:200])
+            return None
+        try:
+            return int(resp.json()["result"]["message_id"])
+        except Exception:  # noqa: BLE001 — принято, но id не прочитать
+            return -1
+    except Exception as e:
+        logger.warning("notify_log_group failed (%s)", type(e).__name__)
+        return None
+
+
+async def notify_log_group(text: str, thread_id: str = "", *, silent: bool = False) -> bool:
     """Отправить text в общую TG-группу логов через ОБЩИЙ лог-бот.
 
     Токен лог-бота (TG_LOG_BOT_TOKEN) и id группы (TG_LOG_CHAT_ID) берутся из .env.
@@ -73,37 +109,14 @@ async def notify_log_group(text: str, thread_id: str = "") -> bool:
     Никогда не бросает: сбой отправки лога не должен валить обработку ошибки.
     Возвращает True если Telegram принял сообщение.
     """
-    token = config.log_bot_token
-    chat_id = config.log_chat_id
-    if not token or not chat_id:
-        return False
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    if thread_id:
-        try:
-            payload["message_thread_id"] = int(thread_id)
-        except (TypeError, ValueError):
-            pass
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(_API.format(token=token), json=payload)
-        if resp.status_code != 200:
-            logger.warning("notify_log_group: %s %s", resp.status_code, resp.text[:200])
-            return False
-        return True
-    except Exception as e:
-        logger.warning("notify_log_group failed: %s", e)
-        return False
+    return await _send_log(text, thread_id, silent=silent) is not None
 
 
 async def notify_booking_log(text: str) -> bool:
-    """Ошибки / деплои / события букинга (Zarya) → отдельный топик лог-группы
-    (`TG_LOG_THREAD_BOOKING`, #23). Fail-safe как notify_log_group."""
-    return await notify_log_group(text, config.log_thread_booking)
+    """События букинга (Zarya, строки аудита) → топик Зари лог-группы (`TG_LOG_THREAD_BOOKING`, 1182).
+    Шапка шаблона ops-группы («⭐ zarya · booking»), содержимое строки без изменений. Fail-safe."""
+    from core.ops_alert import format_event
+    return await notify_log_group(format_event("zarya", "📅", "booking", text), config.log_thread_booking)
 
 
 def _version_stamp() -> str:
@@ -140,37 +153,6 @@ def git_sha() -> str:
 
 def log_version(bot: str) -> None:
     logger.info("startup: bot=%s GIT_SHA=%s", bot, git_sha())
-
-
-async def notify_startup(bot: str) -> bool:
-    """Стартовый пинг в общую TG-группу логов (как klgpff «поднялся»).
-
-    Текст и топик форума выбираются по bot ('nexus'|'arcana') — каждый бот
-    в свой топик. Fail-safe: переиспользует notify_log_group, который сам
-    no-op'ит без TG_LOG_BOT_TOKEN/TG_LOG_CHAT_ID, поэтому старт бота НЕ падает,
-    если лог-группа не настроена. Старт важнее лога.
-    """
-    log_version(bot)
-    if bot == "arcana":
-        label, thread = "🌒 <b>Arcana</b>", config.log_thread_arcana
-    elif bot in ("booking", "zarya"):
-        label, thread = "⭐ <b>Zarya</b>", config.log_thread_booking
-    else:
-        label, thread = "☀️ <b>Nexus</b>", config.log_thread_nexus
-    try:
-        host = socket.gethostname()
-    except Exception:
-        host = "?"
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    # Версия (время сборки / SHA) — чтобы в мониторинге было видно, КАКАЯ версия
-    # реально задеплоена. host — id контейнера (помечаем 🖥, чтобы не путать с
-    # хэшем коммита). Версия первой строкой, явным «🔖».
-    text = (
-        f"{label} поднялся\n"
-        f"🔖 <code>{_esc(_version_stamp())}</code>\n"
-        f"🖥 <code>{_esc(host)}</code> · {now}"
-    )
-    return await notify_log_group(text, thread)
 
 
 async def clear_task_reminder(task_id: str, bot: str = "nexus") -> bool:

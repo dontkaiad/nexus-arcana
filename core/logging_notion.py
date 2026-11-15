@@ -12,6 +12,8 @@ import logging
 import time
 import traceback as _tb
 
+from core import ops_alert, ops_transient
+
 
 _err_log = logging.getLogger("bot.errors.system")
 
@@ -70,6 +72,18 @@ class StructuredErrorHandler(logging.Handler):
         if record.name.startswith("bot.errors"):
             return
 
+        # Транзиентный сбой Telegram/сети (обрыв long polling и т.п.): не алерт на каждый, а счётчик
+        # и один алерт на всплеск (core/ops_transient). В stdout он по-прежнему попадает ниже.
+        transient = ops_transient.classify_record(record)
+        if transient:
+            action = ops_transient.tracker().record(transient)
+            _remember(self.bot_label)
+            if action:
+                try:
+                    _fire_and_forget(ops_alert.send_alert(ops_alert.bot_key(self.bot_label), *action))
+                except Exception:
+                    pass
+
         # Дебаунс: первое вхождение ключа пропускаем всегда (важно не потерять
         # первое появление новой ошибки), повтор в окне 5 мин — гасим. Раньше
         # дефолт .get(key, 0) глушил первое сообщение, если time.monotonic() был
@@ -88,9 +102,10 @@ class StructuredErrorHandler(logging.Handler):
                 del _recent[k]
 
         msg = record.getMessage()[:2000]
-        tb_text = ""
-        if record.exc_info and record.exc_info[2]:
-            tb_text = "".join(_tb.format_exception(*record.exc_info))[:500]
+        tb_full = ""
+        if record.exc_info and record.exc_info[1] is not None:   # класс нужен и без трейсбэка
+            tb_full = "".join(_tb.format_exception(*record.exc_info))
+        tb_text = tb_full[:500]
 
         _err_log.error(
             'bot=%s source=%s message=%s trace=%s',
@@ -102,11 +117,14 @@ class StructuredErrorHandler(logging.Handler):
         # notify_log_group async → fire-and-forget на running loop; нет loop →
         # тихий скип. notify_log_group сам no-op'ит без TG_LOG_BOT_TOKEN. Всё в
         # guard: сбой зеркала не должен ломать логирование.
+        if transient:
+            return
         try:
             from core.bot_notify import notify_log_group
             from core.error_log import _format_for_group, _thread_for
+            # в алерт идут только класс исключения и место в коде (из ПОЛНОГО трейсбэка), не текст
             text = _format_for_group(
-                msg, "uncaught", "", tb_text, self.bot_label, "–", record.name,
+                msg, "uncaught", "", tb_full, self.bot_label, "–", record.name,
             )
             _fire_and_forget(notify_log_group(text, _thread_for(self.bot_label)))
         except Exception:
@@ -117,7 +135,26 @@ class StructuredErrorHandler(logging.Handler):
 NotionErrorHandler = StructuredErrorHandler
 
 
+_label = ""        # метка бота этого процесса (для «восстановлено» из heartbeat-цикла)
+
+
+def _remember(bot_label: str) -> None:
+    global _label
+    _label = bot_label
+
+
+async def tick() -> None:
+    """Из heartbeat-цикла: «восстановлено» после тихих минут за всплеском транзиентных ошибок. Не бросает."""
+    try:
+        action = ops_transient.tracker().tick()
+        if action and _label:
+            await ops_alert.send_alert(ops_alert.bot_key(_label), *action)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def install(bot_label: str = "☀️ Nexus") -> None:
     """Attach StructuredErrorHandler to the root logger."""
+    _remember(bot_label)
     handler = StructuredErrorHandler(bot_label=bot_label)
     logging.getLogger().addHandler(handler)

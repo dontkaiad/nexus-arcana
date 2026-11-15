@@ -14,7 +14,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from core.config import config
 from core.middleware import LlmNoticeMiddleware, WhitelistMiddleware
 from core.error_log import log_error
-from core.bot_notify import notify_startup
+from core.bot_notify import log_version
 from core.heartbeat import start_heartbeat
 from core.classifier import classify, process_item
 
@@ -1796,10 +1796,11 @@ async def main() -> None:
             await proactive_budget_review(bot)
         except Exception as e:
             logger.error("proactive_budget_review on startup failed: %s", e)
-        await notify_startup("nexus")  # стартовый пинг в лог-группу (fail-safe)
-        # NB: booking API живёт в этом же процессе — отдельный «Booking API up»
-        # пинг убран (#23): он дублировал nexus-пинг на КАЖДОМ деплое и раздувал
-        # уведы до трёх. Топик букинга (1182) остаётся для ошибок + деплоев Zarya.
+        # Пинга «поднялся» в лог-группу больше нет: деплой сообщает CI (ops-notify), падение или
+        # крэш-цикл контейнера сообщает host-монитор. В лог пишем только версию.
+        log_version("nexus")
+        # NB: booking API живёт в этом же процессе; топик букинга (1182) остаётся для ошибок Zarya
+        # и строк аудита броней.
         start_heartbeat()  # фоновый heartbeat для docker healthcheck
 
     dp.startup.register(_on_startup)

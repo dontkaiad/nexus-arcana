@@ -442,7 +442,9 @@ def test_alert_says_what_happened_and_holds_nothing_extra(env):
     create({"title": "Чистка & очищение", "deadline_date": day(3), "deadline_time": "09:15", "category": "📚 Обучение"})
     [call] = env.alert.await_args_list
     text = call.args[0]
-    assert text == f"🤖 Claude создал практику: <b>Чистка &amp; очищение</b>, срок {day(3)} 09:15"
+    # шапка шаблона ops-группы, дальше метка Claude без изменений (решение владелицы)
+    assert text == (f"🤖 <b>🔌 kai-mcp</b> · claude\n"
+                    f"🤖 Claude создал практику: <b>Чистка &amp; очищение</b>, срок {day(3)} 09:15")
     assert TOKEN_P not in text and str(OWNER) not in text and MARK not in text
 
 

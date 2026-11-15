@@ -42,6 +42,11 @@ def write_heartbeat(path: str = HEARTBEAT_FILE) -> bool:
 async def _heartbeat_loop(path: str, interval: int) -> None:
     while True:
         write_heartbeat(path)
+        try:   # «восстановлено» после всплеска транзиентных ошибок Telegram/сети
+            from core import logging_notion
+            await logging_notion.tick()
+        except Exception:  # noqa: BLE001 — счётчик не должен останавливать heartbeat
+            pass
         await asyncio.sleep(interval)
 
 
