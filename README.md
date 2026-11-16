@@ -15,15 +15,9 @@
 
 ## Demo
 
-| ☀️ Nexus — day | 🌒 Arcana — night |
-| :---: | :---: |
-| ![Nexus day](docs/assets/nexus.png) | ![Arcana night](docs/assets/arcana.png) |
+![Nexus by day and Arcana by night: the Mini App switching between the two bots](docs/assets/nexus-arcana-demo.gif)
 
-![day → night transition](docs/assets/transition.gif)
-
-> _Image placeholders — drop the files into `docs/assets/`:_
-> `nexus.png` (Nexus day screen) · `arcana.png` (Arcana night screen) ·
-> `transition.gif` (the sunset → moonrise animation when switching between the two bots).
+_☀️ Nexus by day, 🌒 Arcana by night: the sunset → moonrise animation when switching between the two bots._
 
 ---
 
