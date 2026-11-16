@@ -7,6 +7,7 @@ the public view and a nudge. Group chats: only replies to /commands, an
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -142,16 +143,39 @@ async def _dm(bot, tg_id: int, text: str, kb=None) -> bool:
         return False
 
 
+# Строка аудита в топик 1182 уходит В ФОНЕ: отправка туда нередко занимает больше 5 с (ReadTimeout), а
+# хендлеры не должны ждать лог (отмена брони отвечает на callback после _notify_owner). Фоновой задаче
+# можно дать больший таймаут без риска для горячего пути; без ретрая, чтобы не плодить дубли, когда
+# Telegram принял запрос уже после нашего таймаута. Ссылки на задачи держим в наборе: цикл событий хранит
+# их слабо, и несохранённая задача может быть собрана сборщиком до завершения.
+_BOOKING_LOG_TIMEOUT = 20.0
+_LOG_TASKS: "set[asyncio.Task]" = set()
+
+
+async def _send_booking_log(text: str) -> None:
+    """Фоновая отправка строки аудита; ничего не бросает, в лог только класс ошибки."""
+    try:
+        from core.bot_notify import notify_booking_log
+        await notify_booking_log(text, timeout=_BOOKING_LOG_TIMEOUT)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("owner log-topic notify failed (%s)", type(e).__name__)
+
+
+def _spawn_booking_log(text: str) -> None:
+    task = asyncio.create_task(_send_booking_log(text))
+    _LOG_TASKS.add(task)
+    task.add_done_callback(_LOG_TASKS.discard)
+
+
 async def _notify_owner(text: str, bot=None) -> None:
-    """Booking event → DM to every owner tg_id + an audit line in topic 1182."""
+    """Booking event → DM to every owner tg_id + an audit line in topic 1182 (in the background)."""
     if bot:
         for owner in config.allowed_ids:
             await _dm(bot, owner, text)
     try:
-        from core.bot_notify import notify_booking_log
-        await notify_booking_log(text)
+        _spawn_booking_log(text)
     except Exception as e:  # noqa: BLE001
-        logger.warning("owner log-topic notify failed: %s", e)
+        logger.warning("owner log-topic notify failed (%s)", type(e).__name__)
 
 
 def _cancel_kb(booking_id: int) -> InlineKeyboardMarkup:

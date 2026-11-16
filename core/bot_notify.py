@@ -63,8 +63,10 @@ async def notify_user(tg_id: int, text: str, bot: str = "nexus") -> bool:
         return False
 
 
-async def _send_log(text: str, thread_id: str = "", *, silent: bool = False) -> Optional[int]:
+async def _send_log(text: str, thread_id: str = "", *, silent: bool = False,
+                    timeout: Optional[float] = None) -> Optional[int]:
     """Один sendMessage в лог-группу. Возвращает message_id, если Telegram принял, иначе None. Не бросает.
+    `timeout` — сек на запрос (по умолчанию _LOG_TIMEOUT); больший ставят только фоновые отправки.
     В лог при сбое идёт только класс исключения: текст httpx-ошибки содержит URL, а в нём токен бота."""
     token = config.log_bot_token
     chat_id = config.log_chat_id
@@ -84,7 +86,7 @@ async def _send_log(text: str, thread_id: str = "", *, silent: bool = False) -> 
         except (TypeError, ValueError):
             pass
     try:
-        async with httpx.AsyncClient(timeout=_LOG_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_LOG_TIMEOUT if timeout is None else timeout) as client:
             resp = await client.post(_API.format(token=token), json=payload)
         if resp.status_code != 200:
             logger.warning("notify_log_group: %s %s", resp.status_code, resp.text[:200])
@@ -98,7 +100,8 @@ async def _send_log(text: str, thread_id: str = "", *, silent: bool = False) -> 
         return None
 
 
-async def notify_log_group(text: str, thread_id: str = "", *, silent: bool = False) -> bool:
+async def notify_log_group(text: str, thread_id: str = "", *, silent: bool = False,
+                           timeout: Optional[float] = None) -> bool:
     """Отправить text в общую TG-группу логов через ОБЩИЙ лог-бот.
 
     Токен лог-бота (TG_LOG_BOT_TOKEN) и id группы (TG_LOG_CHAT_ID) берутся из .env.
@@ -109,14 +112,16 @@ async def notify_log_group(text: str, thread_id: str = "", *, silent: bool = Fal
     Никогда не бросает: сбой отправки лога не должен валить обработку ошибки.
     Возвращает True если Telegram принял сообщение.
     """
-    return await _send_log(text, thread_id, silent=silent) is not None
+    extra = {} if timeout is None else {"timeout": timeout}      # без timeout вызов как раньше
+    return await _send_log(text, thread_id, silent=silent, **extra) is not None
 
 
-async def notify_booking_log(text: str) -> bool:
+async def notify_booking_log(text: str, *, timeout: Optional[float] = None) -> bool:
     """События букинга (Zarya, строки аудита) → топик Зари лог-группы (`TG_LOG_THREAD_BOOKING`, 1182).
     Шапка шаблона ops-группы («⭐ zarya · booking»), содержимое строки без изменений. Fail-safe."""
     from core.ops_alert import format_event
-    return await notify_log_group(format_event("zarya", "📅", "booking", text), config.log_thread_booking)
+    extra = {} if timeout is None else {"timeout": timeout}      # только фоновый вызов Зари ставит больше 5 с
+    return await notify_log_group(format_event("zarya", "📅", "booking", text), config.log_thread_booking, **extra)
 
 
 def _version_stamp() -> str:
