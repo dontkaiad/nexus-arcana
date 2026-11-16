@@ -11,6 +11,9 @@ Nexus — PgTasksRepo/TasksRepo, Arcana — PgWorksRepo. Из каждого п�
 закрыто до срабатывания; + «весь день», повтор и periodic re-arm. Получатели — два
 TG-аккаунта одного владельца (#202): уведомление уходит в оба.
 
+Сдвиг повторяющейся серии (restore pass 2 и «Сделано») проверяется по тому, что реально
+записано в PG: время дедлайна и напоминания обязано сохраняться, «весь день» — остаться днём.
+
 Клавиатуры различаются по замыслу (префикс callback ``task_`` / ``work_``) — это
 проверяется отдельно и в сравнение не входит.
 """
@@ -87,6 +90,7 @@ class _Harness:
     def __init__(self):
         self.specs: dict = {}
         self.cleared: set = set()
+        self.written: dict = {}      # что записано в PG при сдвиге серии: {"reminder": wall, "deadline": wall}
         self.sched = _FakeScheduler()
         self.bot = _FakeBot()
 
@@ -103,6 +107,15 @@ class _Harness:
     def _future_deadline_no_reminder(self, _uid=""):
         return [s for s in self.specs.values()
                 if s.is_open() and s.deadline and s.deadline > _now() and not s.reminder]
+
+    def _record_written(self, reminder_wall: str = "", deadline_wall: str = "") -> None:
+        """Сдвиг серии → нормализованная запись. «Весь день» у Задачи — дата, у Работы — локальная
+        полночь: приводим к одному виду (дата без времени)."""
+        norm = lambda w: w[:10] if w.endswith("T00:00") else w   # noqa: E731
+        if reminder_wall:
+            self.written["reminder"] = norm(reminder_wall)
+        if deadline_wall:
+            self.written["deadline"] = norm(deadline_wall)
 
     def _clear(self, item_id):
         self.cleared.add(str(item_id))
@@ -138,6 +151,14 @@ class NexusHarness(_Harness):
             s = self.specs.get(str(page_id))
             return self._task(s) if s else None
 
+        async def set_props(_page_id, props):
+            def wall(prop):
+                start = ((props.get(prop) or {}).get("date") or {}).get("start", "")
+                if "T" not in start:
+                    return start
+                return _wall(datetime.fromisoformat(start))
+            self._record_written(wall("Напоминание"), wall("Дедлайн"))
+
         for target, attr, val in [
             (tasks, "_scheduler", self.sched),
             (tasks, "_bot", self.bot),
@@ -151,9 +172,18 @@ class NexusHarness(_Harness):
             (pgt.PgTasksRepo, "clear_reminder", AsyncMock(side_effect=lambda tid: self._clear(tid))),
             (trepo.TasksRepo, "retrieve_page", AsyncMock(side_effect=retrieve)),
             (trepo.TasksRepo, "set_in_progress", AsyncMock()),
-            (trepo.TasksRepo, "set_props", AsyncMock()),
+            (trepo.TasksRepo, "set_props", AsyncMock(side_effect=set_props)),
         ]:
             stack.enter_context(patch.object(target, attr, val))
+
+    async def complete_recurring(self, spec: Spec) -> None:
+        """«Сделано» по повторяющейся Задаче — родной обработчик Nexus."""
+        from nexus.handlers import tasks
+        msg = MagicMock()
+        msg.answer = AsyncMock()
+        msg.chat.id = TG_IDS[0]
+        await tasks._handle_recurring_task_reset(
+            msg, spec.id, self._task(spec), spec.repeat, spec.title, TG_IDS[0])
 
 
 class ArcanaHarness(_Harness):
@@ -186,6 +216,12 @@ class ArcanaHarness(_Harness):
             s = self.specs.get(str(work_id))
             return self._work(s) if s else None
 
+        async def reschedule_cycle(_work_id, deadline=None, reminder=None):
+            self._record_written(_wall(reminder) if reminder else "", _wall(deadline) if deadline else "")
+
+        async def set_reminder(_work_id, reminder):
+            self._record_written(_wall(reminder))
+
         for target, attr, val in [
             (flow, "_scheduler", self.sched),
             (flow, "_bot", self.bot),
@@ -196,11 +232,21 @@ class ArcanaHarness(_Harness):
              wrap(self._future_deadline_no_reminder)),
             (pgw.PgWorksRepo, "clear_reminder", AsyncMock(side_effect=lambda wid: self._clear(wid))),
             (pgw.PgWorksRepo, "find_by_id", AsyncMock(side_effect=find)),
-            (pgw.PgWorksRepo, "set_reminder", AsyncMock()),
-            (pgw.PgWorksRepo, "reschedule_cycle", AsyncMock()),
+            (pgw.PgWorksRepo, "set_reminder", AsyncMock(side_effect=set_reminder)),
+            (pgw.PgWorksRepo, "reschedule_cycle", AsyncMock(side_effect=reschedule_cycle)),
         ]:
             stack.enter_context(patch.object(target, attr, val))
         stack.enter_context(patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=TZ)))
+        stack.enter_context(patch("core.user_manager.get_user_id", AsyncMock(return_value="u-1")))
+        stack.enter_context(patch("core.user_manager.get_tg_ids_for_user", AsyncMock(return_value=TG_IDS)))
+
+    async def complete_recurring(self, spec: Spec) -> None:
+        """«Сделала» по повторяющейся Работе — родной обработчик Arcana."""
+        from arcana.handlers.work_reminder_kb import _handle_recurring_work_done
+        msg = MagicMock()
+        msg.chat.id = TG_IDS[0]
+        msg.from_user.id = TG_IDS[0]
+        await _handle_recurring_work_done(msg, spec.id, self._work(spec), spec.title, TZ)
 
 
 HARNESSES = {"nexus": NexusHarness, "arcana": ArcanaHarness}
@@ -222,6 +268,7 @@ async def _run(system: str, scenario) -> dict:
             # что ушло: (получатель, шапка сообщения без вопроса «Сделано?»)
             "sent": [(chat, text.split("\n\n")[0]) for chat, text, _kb in h.bot.sent],
             "cleared": sorted(h.cleared),
+            **({"written": dict(h.written)} if h.written else {}),
         }
 
 
@@ -350,6 +397,66 @@ async def sc_arm_reminder_wins_over_deadline(h):
     await h.flow.arm("8", TITLE, chat_id=TG_IDS[0], tz_offset=TZ, deadline_wall=dl, recipients=TG_IDS)
 
 
+def _local(days: int, hh: int, mm: int) -> datetime:
+    """Локальное (МСК) время суток через ``days`` дней → aware UTC."""
+    d = _now().astimezone(MSK) + timedelta(days=days)
+    return d.replace(hour=hh, minute=mm, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def _local_day(days: int) -> datetime:
+    d = (_now().astimezone(MSK) + timedelta(days=days)).date()
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)   # «весь день»: дата
+
+
+async def sc_restart_shift_keeps_times(h):
+    """Рестарт, повтор без «Времени повтора»: дедлайн остаётся 18:30, напоминание — 11:20."""
+    h.specs[ITEM_ID] = Spec(reminder=_local(-2, 11, 20), deadline=_local(-2, 18, 30), repeat="Ежедневно")
+    await h.flow.restore()
+
+
+async def sc_restart_shift_keeps_all_day(h):
+    """Рестарт: дедлайн «весь день» остаётся днём (не превращается в 03:00)."""
+    h.specs[ITEM_ID] = Spec(reminder=_local(-2, 11, 20), deadline=_local_day(-2), all_day=True,
+                            repeat="Ежедневно")
+    await h.flow.restore()
+
+
+async def sc_restart_shift_canonical_time_wins(h):
+    """Явное «Время повтора» 10:00 возвращает напоминание на 10:00; время дедлайна не трогает."""
+    h.specs[ITEM_ID] = Spec(reminder=_local(-2, 11, 20), deadline=_local(-2, 18, 30),
+                            repeat="Ежедневно", repeat_time="10:00")
+    await h.flow.restore()
+
+
+async def sc_done_shift_keeps_times(h):
+    """«Сделано» по повторяющейся: дедлайн 18:30 и напоминание 11:20 переезжают на новую дату."""
+    spec = Spec(reminder=_local(-1, 11, 20), deadline=_local(-1, 18, 30), repeat="Ежедневно")
+    h.specs[ITEM_ID] = spec
+    await h.complete_recurring(spec)
+
+
+async def sc_done_shift_keeps_all_day(h):
+    """«Сделано»: дедлайн «весь день» остаётся днём."""
+    spec = Spec(reminder=_local(-1, 11, 20), deadline=_local_day(-1), all_day=True, repeat="Ежедневно")
+    h.specs[ITEM_ID] = spec
+    await h.complete_recurring(spec)
+
+
+async def sc_done_shift_canonical_time_wins(h):
+    """«Сделано» с явным «Временем повтора»: напоминание на каноническое 10:00."""
+    spec = Spec(reminder=_local(-1, 11, 20), deadline=_local(-1, 18, 30),
+                repeat="Ежедневно", repeat_time="10:00")
+    h.specs[ITEM_ID] = spec
+    await h.complete_recurring(spec)
+
+
+async def sc_done_shift_without_reminder_starts_from_repeat_time(h):
+    """«Сделано», напоминания не было: первый будущий запуск из «Времени повтора»."""
+    spec = Spec(deadline=_local(-1, 18, 30), repeat="Ежедневно", repeat_time="10:00")
+    h.specs[ITEM_ID] = spec
+    await h.complete_recurring(spec)
+
+
 SCENARIOS = [
     sc_future_reminder, sc_reminder_just_passed, sc_reminder_past_not_scheduled,
     sc_past_after_restart, sc_past_after_restart_not_repeated,
@@ -359,6 +466,9 @@ SCENARIOS = [
     sc_periodic_skips_missed_recurring, sc_restart_shifts_missed_recurring,
     sc_recurring_without_reminder_revived, sc_periodic_rearms_future,
     sc_arm_reminder_wins_over_deadline,
+    sc_restart_shift_keeps_times, sc_restart_shift_keeps_all_day, sc_restart_shift_canonical_time_wins,
+    sc_done_shift_keeps_times, sc_done_shift_keeps_all_day, sc_done_shift_canonical_time_wins,
+    sc_done_shift_without_reminder_starts_from_repeat_time,
 ]
 
 
@@ -448,6 +558,41 @@ async def test_restart_shifts_missed_recurring_and_says_so():
 async def test_deadline_ping_only_when_there_is_no_reminder():
     r = await _both(sc_arm_reminder_wins_over_deadline)
     assert sorted(k for k, _ in r["jobs"]) == ["deadline", "reminder"]
+
+
+def _today() -> str:
+    return _wall(_now())[:10]
+
+
+@pytest.mark.parametrize("scenario", [sc_restart_shift_keeps_times, sc_done_shift_keeps_times],
+                         ids=lambda f: f.__name__)
+async def test_shifting_a_series_keeps_the_deadline_and_reminder_time(scenario):
+    w = (await _both(scenario))["written"]
+    assert w["reminder"].endswith("T11:20"), w
+    assert w["deadline"].endswith("T18:30"), w
+    assert w["reminder"][:10] > _today() and w["deadline"][:10] > _today(), w
+
+
+@pytest.mark.parametrize("scenario", [sc_restart_shift_keeps_all_day, sc_done_shift_keeps_all_day],
+                         ids=lambda f: f.__name__)
+async def test_shifting_a_series_keeps_an_all_day_deadline_a_plain_date(scenario):
+    w = (await _both(scenario))["written"]
+    assert len(w["deadline"]) == 10 and w["deadline"] > _today(), w
+    assert w["reminder"].endswith("T11:20"), w
+
+
+@pytest.mark.parametrize("scenario", [sc_restart_shift_canonical_time_wins, sc_done_shift_canonical_time_wins],
+                         ids=lambda f: f.__name__)
+async def test_explicit_repeat_time_is_the_reminder_time_but_never_touches_the_deadline(scenario):
+    w = (await _both(scenario))["written"]
+    assert w["reminder"].endswith("T10:00"), w
+    assert w["deadline"].endswith("T18:30"), w
+
+
+async def test_done_without_a_reminder_starts_from_the_repeat_time():
+    w = (await _both(sc_done_shift_without_reminder_starts_from_repeat_time))["written"]
+    assert w["reminder"].endswith("T10:00") and w["reminder"][:10] >= _today(), w
+    assert w["deadline"].endswith("T18:30"), w
 
 
 def test_callback_prefixes_differ_by_design():

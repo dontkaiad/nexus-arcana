@@ -26,6 +26,16 @@
 6. **Parity is a test.** `tests/test_reminder_parity.py` runs one set of scenarios on both adapters and fails on any difference in jobs, sent
    messages or cleared reminders. Keyboards differ on purpose and are asserted separately.
 
+7. **One place shifts a recurring series** (`shift_cycle`, `first_run_wall`): restore pass 2 and the "done" handlers of both bots call it.
+   The deadline keeps its time of day (an all-day deadline stays a plain date), the reminder keeps its time of day unless the series has an
+   explicit `repeat_time` (then that time wins, which also pulls a snoozed reminder back). The 09:00 default of `parse_repeat_time` is
+   only used when there is no reminder at all. Before, pass 2 and the Nexus handler wrote the deadline as a date, and a series without
+   `repeat_time` had its reminder reset to 09:00.
+8. **No "end of the task" ping for works yet.** `works.duration_min` is written only by the Zarya slot (`_slot_fields`, always 60) and
+   there is no user-facing writer and no source flag, so a user-set duration cannot be told from the auto slot (a user-set 60 looks the
+   same). Enabling the shift needs `works.duration_source` (`'user'` | `'auto'`, the slot writes `'auto'`), a user writer (a duration in the work
+   parser and/or the Mini App) and `ArcanaReminderAdapter.to_item` returning `duration_min` only for `'user'`; the engine already shifts the ping.
+
 ## Trade-offs
 
 - A work created in the Mini App is armed up to 90 s later, not instantly. The alternative (an RPC between the two processes) adds a

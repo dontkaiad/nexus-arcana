@@ -52,11 +52,11 @@ class ArcanaReminderAdapter(ReminderAdapter):
         await _repo().set_reminder(item_id, wall_to_aware(wall, int(tz_offset)))
 
     async def shift_series(self, item: ReminderItem, new_reminder_wall: str,
-                           new_deadline_day: Optional[str], tz_offset: int) -> None:
+                           new_deadline_wall: Optional[str], tz_offset: int) -> None:
         # reschedule_cycle: новые deadline/reminder + статус обратно в 'open'
         await _repo().reschedule_cycle(
             item.id,
-            deadline=wall_to_aware(new_deadline_day, int(tz_offset)) if new_deadline_day else None,
+            deadline=wall_to_aware(new_deadline_wall, int(tz_offset)) if new_deadline_wall else None,
             reminder=wall_to_aware(new_reminder_wall, int(tz_offset)),
         )
 
@@ -102,7 +102,10 @@ class ArcanaReminderAdapter(ReminderAdapter):
             repeat_time=w.repeat_time or "",
             reminder_wall=dt_to_local_wall(w.reminder_dt, tz_offset) if w.reminder_dt else "",
             deadline_wall=work_deadline_wall(w.deadline_dt, tz_offset),   # «весь день» → пинг в 09:00
-            duration_min=None,   # works.duration_min — авто-слот Зари (60 мин), не «длительность дела»
+            # works.duration_min — авто-слот Зари (всегда 60, пишет _slot_fields); пользовательской длительности у
+            # Работ нет ни в парсере, ни в Mini App, а признака «задано пользователем» в схеме нет — поэтому
+            # пинг НЕ сдвигаем на конец дела. Включать только вместе с works.duration_source ('user'|'auto'), ADR-0043.
+            duration_min=None,
             raw=w,
         )
 

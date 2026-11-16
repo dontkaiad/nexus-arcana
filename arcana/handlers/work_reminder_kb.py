@@ -99,52 +99,25 @@ async def _handle_recurring_work_done(
 
     Возвращает дату следующего вхождения ('YYYY-MM-DD') или '' если не удалось.
     """
-    from core.recurrence import parse_repeat_time, next_cycle_date
+    from core.date_extract import dt_to_local_wall, wall_to_aware
+    from core.reminder_scheduler import shift_cycle
     from arcana.bot import arcana_reminder_flow
+    from arcana.reminder_adapter import work_deadline_wall
     from arcana.repos.pg_works_repo import PgWorksRepo
 
     repeat = (work.repeat if work else "") or "Ежедневно"
-    canon_time, ivl_days = parse_repeat_time((work.repeat_time if work else "") or "")
 
-    cur_deadline = work.deadline_dt.isoformat() if (work and work.deadline_dt) else ""
-    cur_reminder = work.reminder_dt.isoformat() if (work and work.reminder_dt) else ""
-
-    new_deadline = (
-        next_cycle_date(cur_deadline, repeat, tz_offset, ivl_days)
-        if cur_deadline else ""
-    )
-    if cur_reminder:
-        new_reminder = next_cycle_date(
-            cur_reminder, repeat, tz_offset, ivl_days, override_time=canon_time,
-        )
-    elif canon_time and repeat != "Нет":
-        # reminder не был выставлен при создании — первый future-run из repeat_time
-        try:
-            h, m = map(int, canon_time.split(":"))
-        except Exception:
-            h, m = 9, 0
-        tz = timezone(timedelta(hours=tz_offset))
-        now_local = datetime.now(tz)
-        fr = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
-        if fr <= now_local:
-            fr = fr + timedelta(days=1)
-        new_reminder = fr.strftime("%Y-%m-%dT%H:%M")
-    else:
-        new_reminder = ""
-
-    def _to_dt(s: str):
-        if not s:
-            return None
-        try:
-            fmt = "%Y-%m-%dT%H:%M" if "T" in s else "%Y-%m-%d"
-            return datetime.strptime(s[:16], fmt).replace(
-                tzinfo=timezone(timedelta(hours=tz_offset))
-            )
-        except ValueError:
-            return None
+    # ЕДИНАЯ логика сдвига серии (core.reminder_scheduler.shift_cycle) — та же, что у Nexus:
+    # время дедлайна и напоминания сохраняется, «весь день» остаётся днём.
+    cur_deadline = work_deadline_wall(work.deadline_dt, tz_offset) if (work and work.deadline_dt) else ""
+    cur_reminder = dt_to_local_wall(work.reminder_dt, tz_offset) if (work and work.reminder_dt) else ""
+    new_reminder, new_deadline = shift_cycle(
+        repeat, (work.repeat_time if work else "") or "", cur_reminder, cur_deadline, tz_offset)
 
     await PgWorksRepo().reschedule_cycle(
-        work_id, deadline=_to_dt(new_deadline), reminder=_to_dt(new_reminder),
+        work_id,
+        deadline=wall_to_aware(new_deadline, tz_offset) if new_deadline else None,
+        reminder=wall_to_aware(new_reminder, tz_offset) if new_reminder else None,
     )
 
     try:

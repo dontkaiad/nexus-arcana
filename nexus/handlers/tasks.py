@@ -25,7 +25,7 @@ from nexus.handlers.utils import react
 from core.layout import maybe_convert
 from core.utils import cancel_button, secondary_button
 from core.task_reminder_msg import save_task_reminder, delete_task_reminder
-from core.reminder_scheduler import ReminderAdapter, ReminderItem, ReminderScheduler
+from core.reminder_scheduler import ReminderAdapter, ReminderItem, ReminderScheduler, shift_cycle
 from core.duration import parse_duration_minutes, format_duration
 from core.location import (
     CITY_TZ as _CITY_TZ,
@@ -362,11 +362,12 @@ class _NexusReminderAdapter(ReminderAdapter):
         await _repo.set_props(task_id, {"Напоминание": _date_with_tz(wall, tz_offset)})
 
     async def shift_series(self, item: ReminderItem, new_reminder_wall: str,
-                           new_deadline_day: Optional[str], tz_offset: int) -> None:
+                           new_deadline_wall: Optional[str], tz_offset: int) -> None:
         props: dict = {"Напоминание": _date_with_tz(new_reminder_wall, tz_offset),
                        "Статус": _status("Not started")}
-        if new_deadline_day:
-            props["Дедлайн"] = _date_with_tz(new_deadline_day, tz_offset)
+        if new_deadline_wall:
+            # со временем, если оно было ('весь день' остаётся датой → deadline_all_day не слетает)
+            props["Дедлайн"] = _date_with_tz(new_deadline_wall, tz_offset)
         await _repo.set_props(item.id, props)
 
     async def owner_groups(self):
@@ -1090,17 +1091,18 @@ async def _handle_recurring_task_reset(
     """Сбросить повторяющуюся задачу: сдвинуть дедлайн/напоминание, статус → Not started."""
     tz_offset = await _get_user_tz(uid)
 
-    canon_time, ivl_days = _parse_repeat_time(task.repeat_time if task else "")
     current_deadline = task.deadline if task else ""
     current_reminder = task.reminder if task else ""
+    # Даты — локальные настенные, «весь день» остаётся датой (см. _deadline_wall).
+    deadline_wall = _deadline_wall(task, tz_offset) if task else ""
+    reminder_wall = _to_local_wall(current_reminder, tz_offset) if current_reminder else ""
 
     # Если напоминание уже в будущем (сдвинуто restore_reminders_on_startup) — не двигать повторно
     now = datetime.now(timezone(timedelta(hours=tz_offset)))
     _already_future = False
-    if current_reminder:
+    if reminder_wall:
         try:
-            _cr = _ensure_datetime(_to_local_wall(current_reminder, tz_offset))
-            rem_dt = datetime.strptime(_cr, "%Y-%m-%dT%H:%M").replace(
+            rem_dt = datetime.strptime(_ensure_datetime(reminder_wall), "%Y-%m-%dT%H:%M").replace(
                 tzinfo=timezone(timedelta(hours=tz_offset))
             )
             if rem_dt > now:
@@ -1110,29 +1112,13 @@ async def _handle_recurring_task_reset(
             pass
 
     if _already_future:
-        new_reminder = _to_local_wall(current_reminder, tz_offset)
-        new_deadline = current_deadline[:10] if current_deadline else ""
+        new_reminder = reminder_wall
+        new_deadline = deadline_wall
     else:
-        new_deadline = _next_cycle_date(current_deadline, repeat, tz_offset, ivl_days) if current_deadline else ""
-        if current_reminder:
-            new_reminder = _next_cycle_date(
-                current_reminder, repeat, tz_offset, ivl_days,
-                override_time=canon_time,
-            )
-        elif canon_time:
-            # reminder не был проставлен при создании — вычисляем первый future-run из repeat_time
-            try:
-                h, m = map(int, canon_time.split(":"))
-            except Exception:
-                h, m = 9, 0
-            user_tz = timezone(timedelta(hours=tz_offset))
-            now_local = datetime.now(user_tz)
-            fr = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
-            if fr <= now_local:
-                fr = fr + timedelta(days=1)
-            new_reminder = fr.strftime("%Y-%m-%dT%H:%M")
-        else:
-            new_reminder = ""
+        # ЕДИНАЯ логика сдвига серии (core.reminder_scheduler.shift_cycle): время дедлайна и
+        # напоминания сохраняется; нет напоминания → первый future-run из «Времени повтора».
+        new_reminder, new_deadline = shift_cycle(
+            repeat, task.repeat_time if task else "", reminder_wall, deadline_wall, tz_offset)
 
     # v1.2.5 (bug #1): повторяющаяся задача после клика «Сделано» должна
     # оставаться в «In progress» (а не сваливаться в Not started, как было),
@@ -1148,7 +1134,7 @@ async def _handle_recurring_task_reset(
         "Время завершения": _date(completed_now),
     }
     if current_deadline and new_deadline:
-        update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
+        update_props["Дедлайн"] = _date_with_tz(new_deadline, tz_offset)
     if new_reminder:
         update_props["Напоминание"] = _date_with_tz(new_reminder, tz_offset)
 

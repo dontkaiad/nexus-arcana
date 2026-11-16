@@ -20,12 +20,16 @@
     ``periodic=True`` — интервальный re-arm (#210): pass 2 для повторяющихся
     пропускаем, иначе sweep через минуту после живого «🔔» пришлёт ещё и «Пропущено».
 
+  * ``shift_cycle`` / ``first_run_wall`` — ЕДИНОЕ место сдвига повторяющейся записи (restore pass 2 и
+    «Сделано» обоих ботов): время дедлайна и напоминания сохраняется, «весь день» остаётся днём;
+
 Nexus: ``nexus/handlers/tasks.py`` (``_flow``). Arcana: ``arcana/reminder_adapter.py``.
 Паритет двух адаптеров держит ``tests/test_reminder_parity.py`` — расхождение валит тест.
 """
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -59,6 +63,81 @@ def _wall_to_dt(wall: str, tz_offset: int) -> datetime:
     return datetime.strptime(_ensure_datetime(wall), "%Y-%m-%dT%H:%M").replace(
         tzinfo=timezone(timedelta(hours=tz_offset))
     )
+
+
+_HHMM = re.compile(r"^\d{2}:\d{2}$")
+
+
+def explicit_repeat_time(repeat_time: Optional[str]) -> Optional[str]:
+    """Каноническое 'HH:MM' из «Времени повтора», ТОЛЬКО если оно задано явно.
+
+    ``parse_repeat_time`` на пустом значении (и на 'every_2d' без времени) отдаёт 09:00
+    по умолчанию — навязывать его записи со своим временем нельзя (напоминание в 18:30
+    превращалось бы в 09:00). → None, если явного времени нет."""
+    raw = (repeat_time or "").strip()
+    if not raw or not _HHMM.match(raw.split("|", 1)[0]):
+        return None
+    return parse_repeat_time(raw)[0]
+
+
+def first_run_wall(repeat_time: Optional[str], tz_offset: int, now: Optional[datetime] = None) -> str:
+    """Первый будущий запуск серии из «Времени повтора» (по умолчанию 09:00) — локальное
+    'YYYY-MM-DDTHH:MM'. Для записи, у которой напоминания ещё нет."""
+    time_str, _ = parse_repeat_time(repeat_time or "")
+    try:
+        h, m = map(int, time_str.split(":"))
+    except Exception:
+        h, m = 9, 0
+    tz = timezone(timedelta(hours=tz_offset))
+    now_local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    run = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+    if run <= now_local:
+        run += timedelta(days=1)
+    return run.strftime("%Y-%m-%dT%H:%M")
+
+
+def shift_cycle(repeat: str, repeat_time: Optional[str], reminder_wall: str, deadline_wall: str,
+                tz_offset: int, now: Optional[datetime] = None) -> Tuple[str, str]:
+    """ЕДИНОЕ место сдвига повторяющейся записи на следующий цикл — для Задач и Работ,
+    для restore (pass 2) и для «Сделано». Вход/выход — локальные настенные строки.
+
+    * время дедлайна сохраняется ('YYYY-MM-DDTHH:MM' → то же время; дата без времени
+      «весь день» остаётся датой);
+    * время напоминания сохраняется, кроме случая, когда в «Времени повтора» задано
+      явное HH:MM — тогда оно каноническое (возвращает напоминание после снуза);
+    * нет напоминания → первый будущий запуск из «Времени повтора» (09:00 по умолчанию);
+    * сдвигаем, пока срок не станет строго будущим (напоминание — по минуте, дедлайн — по дню).
+
+    → (новое напоминание или '', новый дедлайн или '')."""
+    now = now or datetime.now(timezone.utc)
+    tz = timezone(timedelta(hours=tz_offset))
+    _, ivl_days = parse_repeat_time(repeat_time or "")
+    canon = explicit_repeat_time(repeat_time)
+
+    new_reminder = ""
+    if reminder_wall:
+        new_reminder = _ensure_datetime(reminder_wall)
+        for _ in range(400):
+            new_reminder = next_cycle_date(new_reminder, repeat, tz_offset, ivl_days, override_time=canon)
+            try:
+                if _wall_to_dt(new_reminder[:16], tz_offset) > now:
+                    break
+            except ValueError:
+                break
+    elif repeat not in ("", "Нет"):
+        new_reminder = first_run_wall(repeat_time, tz_offset, now)
+
+    new_deadline = ""
+    if deadline_wall:
+        new_deadline = deadline_wall[:16]
+        for _ in range(400):
+            new_deadline = next_cycle_date(new_deadline, repeat, tz_offset, ivl_days)
+            try:
+                if datetime.strptime(new_deadline[:10], "%Y-%m-%d").replace(tzinfo=tz) > now:
+                    break
+            except ValueError:
+                break
+    return new_reminder, new_deadline
 
 
 @dataclass
@@ -140,8 +219,8 @@ class ReminderAdapter:
         """Записать новое напоминание (проход 3 — оживление серии)."""
 
     async def shift_series(self, item: ReminderItem, new_reminder_wall: str,
-                           new_deadline_day: Optional[str], tz_offset: int) -> None:
-        """Сдвинуть повторяющуюся запись на следующий цикл (проход 2)."""
+                           new_deadline_wall: Optional[str], tz_offset: int) -> None:
+        """Записать сдвинутую серию (проход 2). Даты — из ``shift_cycle``, с сохранённым временем."""
 
     # ── выборки для restore ────────────────────────────────────────────────
     async def owner_groups(self) -> Tuple[Dict[str, List[int]], Dict[int, int]]:
@@ -505,30 +584,11 @@ class ReminderScheduler:
                 # Повторяющаяся: СНАЧАЛА сдвинуть серию в PG, потом уведомить — если
                 # процесс перезапустят между send и записью, следующий restore увидит
                 # future-reminder (pass 1), а не продублирует «Пропущено» (#206).
-                canon_time, ivl_days = parse_repeat_time(item.repeat_time)
+                _, ivl_days = parse_repeat_time(item.repeat_time)
                 repeat_display = interval_label(ivl_days) if ivl_days > 1 else repeat
-                new_reminder = _ensure_datetime(item.reminder_wall)
-                for _ in range(400):
-                    new_reminder = next_cycle_date(new_reminder, repeat, tz, ivl_days,
-                                                   override_time=canon_time)
-                    try:
-                        if _wall_to_dt(new_reminder[:16], tz) > now_utc:
-                            break
-                    except ValueError:
-                        break
-                new_deadline_day: Optional[str] = None
-                if item.deadline_wall:
-                    nd = item.deadline_wall[:16]
-                    for _ in range(400):
-                        nd = next_cycle_date(nd, repeat, tz, ivl_days)
-                        try:
-                            if datetime.strptime(nd[:10], "%Y-%m-%d").replace(
-                                    tzinfo=timezone(timedelta(hours=tz))) > now_utc:
-                                break
-                        except ValueError:
-                            break
-                    new_deadline_day = nd[:10]
-                await ad.shift_series(item, new_reminder, new_deadline_day, tz)
+                new_reminder, new_deadline = shift_cycle(
+                    repeat, item.repeat_time, item.reminder_wall, item.deadline_wall, tz, now_utc)
+                await ad.shift_series(item, new_reminder, new_deadline or None, tz)
                 await self.schedule_reminder(tg_id, item.title, new_reminder, item.id, tz,
                                              recipients=tgids)
                 first = await self._fan_out(
@@ -554,16 +614,7 @@ class ReminderScheduler:
                 item = ad.to_item(raw, tz)
                 if not item.repeat_time:
                     continue
-                time_str, _ivl = parse_repeat_time(item.repeat_time)
-                try:
-                    h, m = map(int, time_str.split(":"))
-                except Exception:
-                    h, m = 9, 0
-                now_local = datetime.now(timezone(timedelta(hours=tz)))
-                first_run = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
-                if first_run <= now_local:
-                    first_run += timedelta(days=1)
-                new_reminder = first_run.strftime("%Y-%m-%dT%H:%M")
+                new_reminder = first_run_wall(item.repeat_time, tz)
                 await ad.set_reminder(item.id, new_reminder, tz)
                 await self.schedule_reminder(tg_id, item.title, new_reminder, item.id, tz,
                                              recipients=tgids)
