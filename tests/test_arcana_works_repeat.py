@@ -53,6 +53,7 @@ def engine():
             "title TEXT NOT NULL, deadline TIMESTAMP, reminder TIMESTAMP, "
             "category TEXT, notes TEXT, priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
             "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
+            "duration_min INTEGER, duration_source TEXT NOT NULL DEFAULT 'auto', "
             "user_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))

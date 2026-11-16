@@ -1642,3 +1642,47 @@ def test_work_deadline_label_is_local_not_utc():
     # «весь день» = полночь локального дня (21:00 UTC накануне) → только дата, и день верный
     assert _work_deadline_label(_dt(2026, 10, 31, 21, 0, tzinfo=_tzu.utc), 3) == "2026-11-01"
     assert _work_deadline_label(None, 3) == ""
+
+
+# ── длительность Работы из Mini App (ADR-0043 п. 8): пишет duration_source='user' ──
+
+def test_arcana_work_create_passes_the_duration_to_the_repo(client):
+    with patch("miniapp.backend.routes.writes._works_pg_repo.create",
+               AsyncMock(return_value="w-5")) as m_create, \
+         patch("miniapp.backend.routes.writes.today_user_tz",
+               AsyncMock(return_value=(_today_date(3), 3))), \
+         patch("miniapp.backend.routes.writes.get_user_id",
+               AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post("/api/arcana/works", json={
+            "title": "Расклад", "category": "🃏 Расклад",
+            "date": "2026-12-01", "deadline_time": "14:00", "duration_min": 180,
+        })
+    assert r.status_code == 200, r.text
+    assert m_create.await_args.kwargs["duration_min"] == 180
+
+
+@pytest.mark.parametrize("bad", [0, -5, 1441])
+def test_arcana_work_create_rejects_a_nonsense_duration(client, bad):
+    with patch("miniapp.backend.routes.writes.get_user_id", AsyncMock(return_value=FAKE_USER_ID)):
+        r = client.post("/api/arcana/works", json={"title": "x", "duration_min": bad})
+    assert r.status_code == 422
+
+
+def test_arcana_work_duration_endpoint_sets_and_clears(client):
+    from arcana.repos.works_repo import Work
+    w = Work(id="w-5", title="Расклад", priority="Важно", deadline_str="", category_str="", has_client=False)
+    for sent, passed in ((90, 90), (None, None)):
+        with patch("miniapp.backend.routes.writes._works_pg_repo.find_by_id", AsyncMock(return_value=w)), \
+             patch("miniapp.backend.routes.writes._works_pg_repo.set_props",
+                   AsyncMock(return_value=True)) as m_set, \
+             patch("miniapp.backend.routes.writes.today_user_tz",
+                   AsyncMock(return_value=(_today_date(3), 3))):
+            r = client.post("/api/arcana/works/w-5/duration", json={"duration_min": sent})
+        assert r.status_code == 200, r.text
+        assert m_set.await_args.args == ("w-5", 3) and m_set.await_args.kwargs == {"duration_min": passed}
+
+
+def test_arcana_work_duration_endpoint_404_and_validation(client):
+    with patch("miniapp.backend.routes.writes._works_pg_repo.find_by_id", AsyncMock(return_value=None)):
+        assert client.post("/api/arcana/works/nope/duration", json={"duration_min": 30}).status_code == 404
+    assert client.post("/api/arcana/works/w-5/duration", json={"duration_min": 0}).status_code == 422

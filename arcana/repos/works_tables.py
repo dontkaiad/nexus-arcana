@@ -75,6 +75,9 @@ works = Table(
     # #241: минуты — сколько работа реально держит время (booking busy-калькулятор).
     # None → дефолт 1ч (DEFAULT_BUSY_MINUTES, core/booking/busy.py).
     Column("duration_min", Integer),
+    # Кто поставил duration_min: 'user' — пользователь (длительность дела), 'auto' — авто-слот Зари (_slot_fields, 60).
+    # Только 'user' сдвигает пинг дедлайна на конец дела (ADR-0043, п. 8). Существующие строки — 'auto'.
+    Column("duration_source", Text, nullable=False, server_default="auto"),
     Column("user_id", Text),
 
     Column("created_at", TIMESTAMP(timezone=True), server_default=text("now()")),

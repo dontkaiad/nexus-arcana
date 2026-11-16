@@ -56,7 +56,7 @@ def engine():
             "deadline TIMESTAMP, reminder TIMESTAMP, category TEXT, "
             "priority_id INTEGER, status_id INTEGER, client_id INTEGER, "
             "repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
-            "user_id TEXT, notes TEXT, scheduled_at TIMESTAMP, duration_min INTEGER, "
+            "user_id TEXT, notes TEXT, scheduled_at TIMESTAMP, duration_min INTEGER, duration_source TEXT NOT NULL DEFAULT 'auto', "
             "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
             "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         ))
@@ -415,3 +415,105 @@ def test_set_deadline_with_tz_keeps_local_midnight():
 def test_set_deadline_without_tz_keeps_legacy_utc_midnight():
     got = _written_deadline(None).astimezone(timezone.utc)
     assert (got.day, got.hour) == (31, 0)
+
+
+# ── duration_source: слот Зари ('auto') vs длительность пользователя ('user'), ADR-0043 п. 8 ──
+
+_RITUAL = "✨ Ритуал"
+_DL = datetime(2026, 12, 1, 12, 0, tzinfo=timezone.utc)      # 15:00 МСК: явное время → ритуал занимает слот
+
+
+def _dur_row(engine, wid):
+    with engine.connect() as c:
+        r = c.execute(sa.select(works.c.duration_min, works.c.duration_source,
+                                works.c.scheduled_at).where(works.c.id == int(wid))).fetchone()
+    return r[0], r[1], r[2] is not None
+
+
+async def _make(engine, category=_RITUAL, deadline=_DL, **kw):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        return await PgWorksRepo().create(
+            title="Работа", priority="Важно", deadline=deadline, category=category,
+            user_id="u1", tz_offset=3, **kw)
+
+
+@pytest.mark.asyncio
+async def test_a_user_duration_is_stored_as_user_and_still_takes_the_slot(engine):
+    wid = await _make(engine, duration_min=90)
+    assert _dur_row(engine, wid) == (90, "user", True)
+
+
+@pytest.mark.asyncio
+async def test_the_zarya_slot_is_stored_as_auto(engine):
+    wid = await _make(engine)
+    assert _dur_row(engine, wid) == (60, "auto", True)
+
+
+@pytest.mark.asyncio
+async def test_no_slot_and_no_duration_is_auto_with_nothing(engine):
+    wid = await _make(engine, category="📚 Прочее")
+    assert _dur_row(engine, wid) == (None, "auto", False)
+
+
+@pytest.mark.asyncio
+async def test_a_user_duration_without_a_slot_is_kept(engine):
+    wid = await _make(engine, category="📚 Прочее", duration_min=45)
+    assert _dur_row(engine, wid) == (45, "user", False)
+
+
+@pytest.mark.asyncio
+async def test_set_props_duration_marks_it_user(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = await _make(engine)                                   # auto 60
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        assert await PgWorksRepo().set_props(wid, 3, duration_min=60) is True
+    assert _dur_row(engine, wid)[:2] == (60, "user")            # те же 60, но теперь задано пользователем
+
+
+@pytest.mark.asyncio
+async def test_editing_the_slot_never_overwrites_a_user_duration(engine):
+    """Сдвиг дедлайна/смена категории пересчитывает слот, но 'user' не трогает."""
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = await _make(engine, duration_min=90)
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        await PgWorksRepo().set_props(wid, 3, deadline="2026-12-02T18:00")
+        await PgWorksRepo().set_props(wid, 3, category="🃏 Расклад", deadline="2026-12-03T10:00")
+    assert _dur_row(engine, wid) == (90, "user", True)
+
+
+@pytest.mark.asyncio
+async def test_editing_the_slot_fills_an_empty_duration_as_auto(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = await _make(engine, category="📚 Прочее")
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        await PgWorksRepo().set_props(wid, 3, category=_RITUAL, deadline="2026-12-02T18:00")
+    assert _dur_row(engine, wid) == (60, "auto", True)
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_user_duration_returns_to_the_auto_slot(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = await _make(engine, duration_min=90)
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        await PgWorksRepo().set_props(wid, 3, duration_min=None, deadline="2026-12-01T15:00")
+    assert _dur_row(engine, wid) == (60, "auto", True)
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_user_duration_without_a_slot_leaves_nothing(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = await _make(engine, category="📚 Прочее", duration_min=45)
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        await PgWorksRepo().set_props(wid, 3, duration_min=None)
+        w = await PgWorksRepo().find_by_id(wid)
+    assert (w.duration_min, w.duration_source) == (None, "auto")
+
+
+@pytest.mark.asyncio
+async def test_the_work_model_carries_the_source(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = await _make(engine, duration_min=90)
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        w = await PgWorksRepo().find_by_id(wid)
+    assert (w.duration_min, w.duration_source) == (90, "user")

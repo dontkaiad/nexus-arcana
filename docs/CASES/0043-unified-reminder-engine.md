@@ -4,7 +4,8 @@
 - **Date:** 2026-11-16
 - **Relates to:** ADR-0023 (recurring works), AUDIT_works_vs_tasks_parity (debt item 4), issues #69, #206, #210, #212, #306
 - **Code conforms to:** `core/reminder_scheduler.py`, `arcana/reminder_adapter.py`, `nexus/handlers/tasks.py` (`_flow`),
-  `arcana/bot.py`, `tests/test_reminder_parity.py`
+  `arcana/bot.py`, `arcana/repos/pg_works_repo.py`, `alembic/versions/f5b7c9d1e346_works_duration_source.py`, `core/duration.py`,
+  `tests/test_reminder_parity.py`
 
 ## Decision
 
@@ -31,10 +32,17 @@
    explicit `repeat_time` (then that time wins, which also pulls a snoozed reminder back). The 09:00 default of `parse_repeat_time` is
    only used when there is no reminder at all. Before, pass 2 and the Nexus handler wrote the deadline as a date, and a series without
    `repeat_time` had its reminder reset to 09:00.
-8. **No "end of the task" ping for works yet.** `works.duration_min` is written only by the Zarya slot (`_slot_fields`, always 60) and
-   there is no user-facing writer and no source flag, so a user-set duration cannot be told from the auto slot (a user-set 60 looks the
-   same). Enabling the shift needs `works.duration_source` (`'user'` | `'auto'`, the slot writes `'auto'`), a user writer (a duration in the work
-   parser and/or the Mini App) and `ArcanaReminderAdapter.to_item` returning `duration_min` only for `'user'`; the engine already shifts the ping.
+8. **End-of-task deadline ping for works: done, for user-set durations only.** `works.duration_min` has two sources that cannot be told
+   apart by value (a user-set 60 looks like the auto slot): the Zarya slot (`_slot_fields`, always 60) and the user. Migration
+   `works.duration_source` (`'user'` | `'auto'`, NOT NULL, default `'auto'`, CHECK; existing rows are `'auto'`, there was no user writer
+   before) records the source. The slot writes `'auto'` and never overwrites a `'user'` value (`_set_props_sync` fills only an empty
+   duration, or one just reset); a duration the user gives is written `'user'` and also overrides the 1 h default in the Zarya busy view (#241).
+   User writers: the work parser (a raw `duration` field, parsed by the same `parse_duration_minutes` as tasks, which now also reads a
+   clock range such as "с 14 до 17"), the Mini App create form and a duration block in the work card
+   (`POST /api/arcana/works/{id}/duration`, `null` clears it back to the auto slot). `ArcanaReminderAdapter.to_item` returns `duration_min`
+   only for `'user'`, so the engine's existing shift moves the deadline ping to deadline + duration. A Nexus task has no auto slot: any
+   duration is user-set, and `tests/test_reminder_parity.py` pins both sides (user → end of the task, auto → the deadline itself).
+   Not covered: reply-edit of a work card ("длительность 2 часа" as a reply) and `work_relation` (links, never user-set) do not write a duration.
 
 ## Trade-offs
 

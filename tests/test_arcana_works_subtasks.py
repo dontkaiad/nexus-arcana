@@ -339,3 +339,21 @@ async def test_subtasks_handler_stores_real_user_id():
         f"Ожидали реальный user_id, получили: {stored_uid!r} "
         "(пустая строка = баг #110)"
     )
+
+
+def test_arcana_works_list_shows_only_a_user_set_duration(client):
+    """Карточка получает длительность, заданную пользователем; авто-слот Зари (60) в ней не показываем."""
+    user_w, auto_w, none_w = _pg_work("w1", "Свой"), _pg_work("w2", "Слот"), _pg_work("w3", "Без")
+    user_w.duration_min, user_w.duration_source = 90, "user"
+    auto_w.duration_min, auto_w.duration_source = 60, "auto"
+    mock_repo = MagicMock()
+    mock_repo.list_all = AsyncMock(return_value=[user_w, auto_w, none_w])
+    with patch("miniapp.backend.routes.arcana_today._pg_works_repo", mock_repo), \
+         patch("miniapp.backend.routes.arcana_today._arcana_inv_repo_lists", _mock_inv_repo([])), \
+         patch("miniapp.backend.routes.arcana_today.load_clients_map", AsyncMock(return_value={})), \
+         patch("miniapp.backend.routes.arcana_today.today_user_tz",
+               AsyncMock(return_value=(date(2026, 5, 3), 3))), \
+         patch("miniapp.backend.routes.arcana_today.get_user_id", AsyncMock(return_value=FAKE_NOTION)):
+        data = client.get("/api/arcana/works").json()
+    by_id = {w["id"]: w for w in data["works"]}
+    assert (by_id["w1"]["duration_min"], by_id["w2"]["duration_min"], by_id["w3"]["duration_min"]) == (90, None, None)

@@ -7630,6 +7630,9 @@ function WorkSheet({ s, work, onClose }) {
   const [busy, setBusy] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [newDate, setNewDate] = useState("");
+  // Длительность дела (минуты): только заданная пользователем — пинг дедлайна уходит на конец дела.
+  const [durOpen, setDurOpen] = useState(false);
+  const [dur, setDur] = useState(work.duration_min != null ? String(work.duration_min) : "");
   const [subOverrides, setSubOverrides] = useState({});
 
   const run = async (label, fn) => {
@@ -7752,6 +7755,42 @@ function WorkSheet({ s, work, onClose }) {
               }}
             >
               {busy === "postpone" ? "Сохраняю..." : "Сохранить дату"}
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 6 }}>
+        <div
+          onClick={() => setDurOpen((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+            background: s.card, border: `1px solid ${s.brd}`, borderRadius: 12,
+            backdropFilter: "blur(10px)", cursor: "pointer", color: s.text,
+          }}
+        >
+          <span style={{ display: "flex" }}>
+            {durOpen ? <ChevronDown size={fs(16)} /> : <ChevronRight size={fs(16)} />}
+          </span>
+          <span style={{ fontSize: fs(14) }}>
+            ⏱ Длительность{work.duration_min ? ` · ${work.duration_min} мин` : ""}
+          </span>
+        </div>
+        {durOpen && (
+          <div style={{ marginTop: 8, padding: "10px 12px", background: s.card, border: `1px solid ${s.brd}`, borderRadius: 12 }}>
+            <div style={{ fontSize: fs(11), color: s.tS, marginBottom: 6 }}>
+              Минут. Напомню в конце дела; пусто — убрать
+            </div>
+            <Input s={s} value={dur} onChange={setDur} placeholder="например, 90" type="number" min="1" inputMode="numeric" />
+            <div
+              onClick={() => !busy && run("duration", () => apiPost(`/api/arcana/works/${work.id}/duration`, { duration_min: dur ? parseInt(dur, 10) : null }))}
+              style={{
+                marginTop: 8, padding: "10px", textAlign: "center", borderRadius: 10,
+                background: `${s.acc}28`, border: `1px solid ${s.acc}`,
+                color: s.acc, fontSize: fs(13), fontWeight: 500,
+                cursor: busy ? "default" : "pointer",
+              }}
+            >
+              {busy === "duration" ? "Сохраняю..." : "Сохранить длительность"}
             </div>
           </div>
         )}
@@ -8511,6 +8550,7 @@ function WorkForm({ s, onSubmit, busy }) {
   const [wantsReminder, setWantsReminder] = useState(false);
   const [remTime, setRemTime] = useState("09:00");
   const [clientId, setClientId] = useState("");
+  const [duration, setDuration] = useState("");   // минуты; пусто — не задана (как у задач)
   const [cats, setCats] = useState([]);
   const [clients, setClients] = useState([]);
 
@@ -8560,6 +8600,8 @@ function WorkForm({ s, onSubmit, busy }) {
         <div style={{ flex: 1 }}><Input s={s} value={date} onChange={setDate} placeholder="Дата" type="date" /></div>
         <div style={{ flex: 1 }}><Input s={s} value={time} onChange={setTime} placeholder="чч:мм" type="time" /></div>
       </div>
+      <div style={{ fontSize: fs(11), color: s.tS }}>⏱ Длительность (мин)</div>
+      <Input s={s} value={duration} onChange={setDuration} placeholder="пусто — не задана" type="number" min="1" inputMode="numeric" />
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(12), color: s.text, cursor: "pointer" }}>
         <input type="checkbox" checked={wantsReminder} onChange={(e) => setWantsReminder(e.target.checked)} />
         🔔 Напоминание
@@ -8584,6 +8626,7 @@ function WorkForm({ s, onSubmit, busy }) {
             reminder_date: wantsReminder ? (date || null) : null,
             reminder_time: wantsReminder ? (remTime || "09:00") : null,
             client_id: clientId || null,
+            duration_min: duration ? parseInt(duration, 10) : null,
           });
         })}
       />

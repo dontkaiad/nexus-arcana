@@ -1245,6 +1245,31 @@ async def arcana_work_postpone(
     return {"ok": True, "new_date": new_date.isoformat()}
 
 
+class WorkDurationBody(BaseModel):
+    duration_min: Optional[int] = Field(default=None, ge=1, le=1440)   # None — снять длительность
+
+
+@router.post("/arcana/works/{work_id}/duration")
+async def arcana_work_duration(
+    work_id: str,
+    body: WorkDurationBody,
+    tg_id: int = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Длительность дела: число минут → duration_source='user' (пинг дедлайна на конец дела); null — снять
+    пользовательскую (вернуться к авто-слоту Зари, если работа его занимает).
+
+    Пинг переставит periodic re-arm процесса Arcana (≤90 с, проход 4): Mini App живёт в процессе Nexus, где
+    flow Arcana не инициализирован (см. arcana/reminder_adapter.py)."""
+    w = await _works_pg_repo.find_by_id(work_id)
+    if not w:
+        raise HTTPException(status_code=404, detail="work not found")
+    _, tz_offset = await today_user_tz(tg_id)
+    ok = await _works_pg_repo.set_props(work_id, int(tz_offset), duration_min=body.duration_min)
+    if not ok:
+        raise HTTPException(status_code=500, detail="failed to update duration")
+    return {"ok": True, "duration_min": body.duration_min}
+
+
 class ArcanaWorkCreateBody(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     category: Optional[str] = None
@@ -1254,6 +1279,9 @@ class ArcanaWorkCreateBody(BaseModel):
     reminder_date: Optional[str] = None  # YYYY-MM-DD
     reminder_time: Optional[str] = None  # HH:MM
     client_id: Optional[str] = None
+    # Длительность дела в минутах — задана пользователем (duration_source='user'): пинг дедлайна уходит
+    # на конец дела, а в busy-калькуляторе Зари она перекрывает 1 ч по умолчанию (#241, ADR-0043 п. 8).
+    duration_min: Optional[int] = Field(default=None, ge=1, le=1440)
 
 
 @router.post("/arcana/works")
@@ -1288,6 +1316,7 @@ async def arcana_work_create(
         client_id=body.client_id or None,
         user_id=user_id,
         tz_offset=int(tz_offset),
+        duration_min=body.duration_min,
     )
     if not work_id:
         raise HTTPException(status_code=500, detail="failed to create work")

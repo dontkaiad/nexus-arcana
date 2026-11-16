@@ -1,7 +1,7 @@
 # BOOKING — data-model contract (heylark Booking, #23 / ADR-0026)
 
 Code conforms to: 6d03370. (+ #26x: linked-task exclusion in `busy_intervals`
-to stop double-counting a booked meeting.) This spec describes the booking
+to stop double-counting a booked meeting; + `works.duration_source`, ADR-0043.) This spec describes the booking
 data model as of that commit; update it in the same PR that changes the model.
 
 > Contract, not snapshot. Describes the persistent model, the guarantees of
@@ -203,10 +203,15 @@ field `"shared"`); list items have no NL setter yet, only the column.
 `tasks.duration_min` / `works.duration_min` (nullable Integer) override the
 default 1h busy-interval length per row (see Free/busy aggregation above).
 Set via the same NL edit-record flow, field `"duration"` — human text
-("2 часа", "30 минут", "полчаса") parsed by `core/duration.py:
-parse_duration_minutes`, not by the LLM. Only wired for Nexus tasks; the
-Arcana `works.duration_min` column exists and is honored by the busy
-calculator, but has no NL setter of its own yet.
+("2 часа", "30 минут", "полчаса", clock range "с 14 до 17") parsed by
+`core/duration.py:parse_duration_minutes`, not by the LLM.
+
+`works.duration_source` (`'user'` | `'auto'`, default `'auto'`) says who wrote
+`works.duration_min`: the Zarya slot of a ritual/spread with an explicit time
+(`_slot_fields`, always the default 60) is `'auto'`, a duration the user gave
+(work parser, Mini App) is `'user'` and is never overwritten by the slot. The
+busy calculator honors both; only `'user'` also moves the deadline ping to the
+end of the task (ADR-0043). A task has no slot, so any task duration is user-set.
 
 ## Zarya (`@heylark_booking_bot`)
 

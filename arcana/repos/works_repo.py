@@ -29,6 +29,10 @@ class Work:
     day_of_week: str = ""
     repeat_time: str = ""
     notes: str = ""
+    # Длительность: duration_source='user' — задана пользователем («на 2 часа»), 'auto' — авто-слот Зари (60).
+    # Только 'user' сдвигает пинг дедлайна на конец дела (arcana/reminder_adapter.py).
+    duration_min: Optional[int] = None
+    duration_source: str = "auto"
 
 
 def _pg_repo():

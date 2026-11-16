@@ -45,7 +45,7 @@ def eng(monkeypatch):
                 "CREATE TABLE works (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
                 "deadline TIMESTAMP, category TEXT, notes TEXT, priority_id INTEGER, status_id INTEGER, "
                 "client_id INTEGER, repeat_id INTEGER, day_of_week_id INTEGER, repeat_time TEXT, "
-                "reminder TIMESTAMP, scheduled_at TIMESTAMP, duration_min INTEGER, user_id TEXT, "
+                "reminder TIMESTAMP, scheduled_at TIMESTAMP, duration_min INTEGER, duration_source TEXT NOT NULL DEFAULT 'auto', user_id TEXT, "
                 "created_at TIMESTAMP, updated_at TIMESTAMP)"))
             c.execute(sa.text("CREATE TABLE task_status (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL)"))
             c.execute(sa.text(

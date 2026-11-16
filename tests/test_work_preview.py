@@ -139,15 +139,15 @@ async def test_clarification_updates_deadline_and_edits_preview():
     msg.bot.edit_message_text.assert_awaited()
 
 
-async def _save_work(deadline: str):
-    """Прогнать cb_work_save для Работы с данным дедлайном → (flow-мок, create-мок)."""
+async def _save_work(deadline: str, **extra):
+    """Прогнать cb_work_save для Работы с данным дедлайном → flow-мок (flow.create — мок записи в PG)."""
     _fresh_db()
     slug = wp._make_slug(42)
     wp._pending_set(42, slug, {
         "title": "Ритуал", "category": "✨ Ритуал", "priority": "Важно",
         "work_type": "🤝 Клиентская", "client_name": "Маша", "client_id": "c1",
         "deadline": deadline, "reminder": None,
-        "msg_id": 999, "chat_id": 100, "user_id": "u",
+        "msg_id": 999, "chat_id": 100, "user_id": "u", **extra,
     })
 
     call = MagicMock()
@@ -173,6 +173,7 @@ async def _save_work(deadline: str):
          patch("core.message_pages.save_message_page", AsyncMock()):
         await wp.cb_work_save(call)
     add_mock.assert_awaited_once()
+    flow.create = add_mock
     return flow
 
 
@@ -246,3 +247,27 @@ async def test_get_effective_tz_falls_back_to_stored_without_zone_mention():
         offset, label = await wp.get_effective_tz(42, "сеанс завтра в 15:00")
     assert offset == 5
     assert label == "UTC+5"
+
+
+@pytest.mark.asyncio
+async def test_work_save_passes_the_user_duration_to_the_repo():
+    """Длительность из разбора («на 2 часа», «с 14 до 17») уходит в create → duration_source='user'."""
+    from datetime import date, timedelta
+    flow = await _save_work((date.today() + timedelta(days=10)).isoformat() + "T14:00", duration_min=180)
+    assert flow.create.await_args.kwargs["duration_min"] == 180
+
+
+@pytest.mark.asyncio
+async def test_work_save_without_a_duration_passes_none():
+    from datetime import date, timedelta
+    flow = await _save_work((date.today() + timedelta(days=10)).isoformat())
+    assert flow.create.await_args.kwargs["duration_min"] is None
+
+
+def test_the_preview_shows_the_duration_like_nexus_tasks():
+    text = wp._format_preview({"title": "Ритуал", "category": "✨ Ритуал", "priority": "Важно",
+                               "work_type": "🌟 Личная", "deadline": "2026-12-01T14:00",
+                               "duration_min": 180, "repeat": "Нет"})
+    assert "⏱ Длительность: 3 ч" in text
+    assert "⏱" not in wp._format_preview({"title": "Ритуал", "category": "✨ Ритуал", "priority": "Важно",
+                                          "work_type": "🌟 Личная", "deadline": "2026-12-01T14:00", "repeat": "Нет"})

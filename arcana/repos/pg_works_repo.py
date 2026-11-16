@@ -117,6 +117,8 @@ def _row_to_work(row) -> Work:
         day_of_week=getattr(row, "dow_label", None) or "",
         repeat_time=getattr(row, "repeat_time", None) or "",
         notes=getattr(row, "notes", None) or "",
+        duration_min=getattr(row, "duration_min", None) or None,
+        duration_source=getattr(row, "duration_source", None) or "auto",
     )
 
 
@@ -134,6 +136,8 @@ def _select_works():
             works.c.notes,
             works.c.client_id,
             works.c.repeat_time,
+            works.c.duration_min,
+            works.c.duration_source,
             p.c.label.label("priority_label"),
             work_status.c.code.label("status_code"),
             rp.c.label.label("repeat_label"),
@@ -241,6 +245,7 @@ class PgWorksRepo:
         day_of_week: Optional[str] = None,
         notes: Optional[str] = None,
         tz_offset: Optional[int] = None,
+        duration_min: Optional[int] = None,
     ) -> Optional[str]:
         pcode = _code_for(_PRIORITY_TO_CODE, priority) or "later"
         slot = _slot_fields(category, deadline, tz_offset) if tz_offset is not None else None
@@ -252,9 +257,14 @@ class PgWorksRepo:
             rep_id   = _resolve(conn, work_repeat,   rcode) if rcode else None
             dow_id   = _resolve(conn, work_day_of_week, dcode) if dcode else None
             cid_int  = int(client_id) if client_id and client_id.isdigit() else None
+            # Слот Зари пишет duration_source='auto'; длительность, заданная пользователем, — 'user'
+            # (она же перекрывает авто-60 в busy-калькуляторе, #241).
             extra = (
-                {"scheduled_at": slot[0], "duration_min": slot[1]} if slot else {}
+                {"scheduled_at": slot[0], "duration_min": slot[1], "duration_source": "auto"} if slot else {}
             )
+            if duration_min and duration_min > 0:
+                extra["duration_min"] = int(duration_min)
+                extra["duration_source"] = "user"
             row = conn.execute(
                 works.insert().values(
                     title=title,
@@ -301,6 +311,7 @@ class PgWorksRepo:
             }
             if slot:
                 values["scheduled_at"], values["duration_min"] = slot
+                values["duration_source"] = "auto"      # слот Зари, не длительность дела
             row = conn.execute(works.insert().values(**values).returning(works.c.id)).fetchone()
         return str(row[0]) if row else None
 
@@ -504,9 +515,21 @@ class PgWorksRepo:
                         # Nexus, см. core/reply_update.py _with_tz_suffix).
                         parsed = parsed.replace(tzinfo=timezone(timedelta(hours=tz_offset)))
                     vals["deadline"] = parsed
+            # Длительность: >0 — задана пользователем ('user'); None/0 — снять пользовательскую,
+            # вернуться к авто-слоту (если работа его занимает) или к «нет».
+            reset_dur = False
+            if "duration_min" in fields:
+                dm = fields.get("duration_min")
+                if dm and int(dm) > 0:
+                    vals["duration_min"] = int(dm)
+                    vals["duration_source"] = "user"
+                else:
+                    vals["duration_min"] = None
+                    vals["duration_source"] = "auto"
+                    reset_dur = True
             if not vals:
                 return False
-            if "deadline" in vals or "category" in vals:
+            if "deadline" in vals or "category" in vals or reset_dur:
                 cur = conn.execute(
                     select(works.c.category, works.c.deadline,
                            works.c.scheduled_at, works.c.duration_min)
@@ -520,8 +543,11 @@ class PgWorksRepo:
                         vals.get("deadline", cur.deadline), tz_offset,
                     )
                     vals["scheduled_at"] = slot[0] if slot else None
-                    if slot and not cur.duration_min:
+                    # Авто-слот НЕ перезаписывает пользовательскую длительность: пишет 60 только в пустое
+                    # место (или после сброса пользовательской) и только как 'auto'.
+                    if slot and vals.get("duration_source") != "user" and (not cur.duration_min or reset_dur):
                         vals["duration_min"] = slot[1]
+                        vals["duration_source"] = "auto"
             res = conn.execute(works.update().where(works.c.id == wid).values(**vals))
         return res.rowcount > 0
 
@@ -572,7 +598,8 @@ class PgWorksRepo:
         """Обновить поля Работы (reply-правка #156; переиспользуемо #154).
 
         Поля: category (Text), priority ('срочно/важно/можно потом'),
-        deadline ('YYYY-MM-DD[ HH:MM]'), notes (Text, #300). `tz_offset` —
+        deadline ('YYYY-MM-DD[ HH:MM]'), notes (Text, #300), duration_min (минуты, >0 → duration_source='user';
+        None/0 — снять пользовательскую длительность). `tz_offset` —
         часовой пояс юзера, применяется к naive deadline (см. _set_props_sync).
         """
         return await asyncio.to_thread(self._set_props_sync, work_id, fields, tz_offset)
@@ -640,11 +667,12 @@ class PgWorksRepo:
         day_of_week: Optional[str] = None,
         notes: Optional[str] = None,
         tz_offset: Optional[int] = None,
+        duration_min: Optional[int] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(
             self._create_sync,
             title, priority, deadline, category, client_id, user_id,
-            repeat, repeat_time, day_of_week, notes, tz_offset,
+            repeat, repeat_time, day_of_week, notes, tz_offset, duration_min,
         )
 
     async def create_personal(

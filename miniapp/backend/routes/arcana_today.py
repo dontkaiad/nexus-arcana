@@ -905,6 +905,8 @@ async def get_arcana_works(
             "category": w.category,
             "deadline": w.deadline_iso,
             "deadline_label": _work_deadline_label(w.deadline_dt, tz_offset),
+            # только заданная пользователем: авто-слот Зари (60) в карточке не показываем
+            "duration_min": w.duration_min if w.duration_source == "user" else None,
             "reminder": reminder_iso,
             "reminder_time": _work_local_time(w.reminder_dt, tz_offset),
             "is_overdue": _is_overdue(w),

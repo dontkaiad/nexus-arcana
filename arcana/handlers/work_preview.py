@@ -34,6 +34,7 @@ from aiogram.types import (
 from core import llm_health
 from core.claude_client import LLMUnavailable, ask_claude
 from core.client_resolve import client_find  # noqa: F401  # client_find via mock.patch
+from core.duration import format_duration, parse_duration_minutes
 from core.error_log import log_error
 from core.llm_json import parse_llm_json
 from core.shared_handlers import get_user_tz
@@ -207,6 +208,8 @@ def _format_preview(data: dict) -> str:
         lines.append(f"🔄 Повтор: {' '.join(rep_bits)}")
     else:
         lines.append(f"📅 Дедлайн: {deadline_disp}")
+        if data.get("duration_min"):
+            lines.append(f"⏱ Длительность: {format_duration(data['duration_min'])}")
     lines.append(f"🔔 Напоминание: {reminder_disp}")
     lines.append(f"👥 {work_type}" + (f" · {client_name}" if client_name else ""))
     if notes:
@@ -328,6 +331,9 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
     repeat = repeat_raw if repeat_raw.lower() in _REPEATS else "Нет"
     repeat_time = data.get("repeat_time") or None
     day_of_week = data.get("day_of_week") or None
+    # Длительность дела («на 2 часа», «с 14 до 17») — тем же детерминированным regexp, что у Задач Nexus
+    # (core/duration.py). Задана пользователем → пишется с duration_source='user' и сдвигает пинг дедлайна.
+    duration_min = parse_duration_minutes(data["duration"]) if data.get("duration") else None
 
     deadline = None
     if deadline_raw and repeat == "Нет":
@@ -345,6 +351,7 @@ async def _parse_work_text(text: str, tz_offset: int) -> dict:
         "repeat_time": repeat_time,
         "day_of_week": day_of_week,
         "notes": notes,
+        "duration_min": duration_min,
     }
 
 
@@ -659,6 +666,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
             day_of_week=data.get("day_of_week"),
             notes=data.get("notes"),
             tz_offset=int(tz_offset),
+            duration_min=data.get("duration_min"),
         )
     except Exception as e:
         logger.error("works_repo.create failed: %s", e)
@@ -745,6 +753,8 @@ async def cb_work_save(call: CallbackQuery) -> None:
         when_line = f"🔄 Повтор: {' '.join(_bits)}\n"
     else:
         when_line = f"📅 Дедлайн: {deadline_disp}\n"
+        if data.get("duration_min"):
+            when_line += f"⏱ Длительность: {format_duration(data['duration_min'])}\n"
 
     text_content = (
         f"⚡ <b>Работа создана!</b>\n"

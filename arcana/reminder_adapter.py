@@ -102,10 +102,10 @@ class ArcanaReminderAdapter(ReminderAdapter):
             repeat_time=w.repeat_time or "",
             reminder_wall=dt_to_local_wall(w.reminder_dt, tz_offset) if w.reminder_dt else "",
             deadline_wall=work_deadline_wall(w.deadline_dt, tz_offset),   # «весь день» → пинг в 09:00
-            # works.duration_min — авто-слот Зари (всегда 60, пишет _slot_fields); пользовательской длительности у
-            # Работ нет ни в парсере, ни в Mini App, а признака «задано пользователем» в схеме нет — поэтому
-            # пинг НЕ сдвигаем на конец дела. Включать только вместе с works.duration_source ('user'|'auto'), ADR-0043.
-            duration_min=None,
+            # Пинг дедлайна — на конец дела ТОЛЬКО для длительности, заданной пользователем ('user'). works.duration_min
+            # пишет и авто-слот Зари (_slot_fields, всегда 60); он занимает время в busy-калькуляторе, но не говорит,
+            # сколько длится дело, а по значению от пользовательского «1 час» не отличить (ADR-0043, п. 8).
+            duration_min=(w.duration_min if getattr(w, "duration_source", "auto") == "user" else None),
             raw=w,
         )
 

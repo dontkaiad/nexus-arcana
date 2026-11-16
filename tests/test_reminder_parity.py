@@ -55,6 +55,8 @@ class Spec:
     status: str = "open"                     # open | done
     repeat: str = "Нет"
     repeat_time: str = ""
+    duration: Optional[int] = None           # минуты
+    duration_user: bool = True               # True — задана пользователем; False — авто-слот Зари (у Работ)
 
     def is_open(self) -> bool:
         return self.status == "open"
@@ -139,6 +141,8 @@ class NexusHarness(_Harness):
             id=s.id, title=s.title, status="Done" if s.status == "done" else "Not started",
             repeat=s.repeat, repeat_time=s.repeat_time,
             reminder=iso(s.reminder), deadline=iso(s.deadline), deadline_all_day=s.all_day,
+            # У Задачи авто-слота нет: любая длительность — пользовательская. Авто-слот Работы для Задачи = «нет».
+            duration_min=s.duration if s.duration_user else None,
         )
 
     def patches(self, stack: ExitStack) -> None:
@@ -205,6 +209,7 @@ class ArcanaHarness(_Harness):
             id=s.id, title=s.title, priority="Важно", deadline_str="", category_str="",
             has_client=False, status="done" if s.status == "done" else "open",
             deadline_dt=deadline, reminder_dt=s.reminder, repeat=s.repeat, repeat_time=s.repeat_time,
+            duration_min=s.duration, duration_source="user" if s.duration_user else "auto",
         )
 
     def patches(self, stack: ExitStack) -> None:
@@ -397,6 +402,30 @@ async def sc_arm_reminder_wins_over_deadline(h):
     await h.flow.arm("8", TITLE, chat_id=TG_IDS[0], tz_offset=TZ, deadline_wall=dl, recipients=TG_IDS)
 
 
+async def sc_user_duration_moves_the_ping_to_the_end(h):
+    """Длительность задана пользователем (90 мин) → пинг дедлайна на deadline + 90 мин."""
+    h.specs[ITEM_ID] = Spec(deadline=_now() + timedelta(hours=4), duration=90)
+    await h.flow.restore()
+
+
+async def sc_user_duration_equal_to_the_default_still_moves_the_ping(h):
+    """Пользователь задал ровно 60 мин (= число авто-слота): по значению не отличить, по источнику — да → сдвиг есть."""
+    h.specs[ITEM_ID] = Spec(deadline=_now() + timedelta(hours=4), duration=60)
+    await h.flow.restore()
+
+
+async def sc_auto_slot_duration_does_not_move_the_ping(h):
+    """Авто-слот Зари (60, источник 'auto') — не длительность дела → пинг на сам дедлайн."""
+    h.specs[ITEM_ID] = Spec(deadline=_now() + timedelta(hours=4), duration=60, duration_user=False)
+    await h.flow.restore()
+
+
+async def sc_auto_slot_with_another_value_does_not_move_the_ping(h):
+    """Не 60, но источник 'auto' (проставлено вручную в БД) — тоже не сдвиг: решает источник, не значение."""
+    h.specs[ITEM_ID] = Spec(deadline=_now() + timedelta(hours=4), duration=120, duration_user=False)
+    await h.flow.restore()
+
+
 def _local(days: int, hh: int, mm: int) -> datetime:
     """Локальное (МСК) время суток через ``days`` дней → aware UTC."""
     d = _now().astimezone(MSK) + timedelta(days=days)
@@ -469,6 +498,8 @@ SCENARIOS = [
     sc_restart_shift_keeps_times, sc_restart_shift_keeps_all_day, sc_restart_shift_canonical_time_wins,
     sc_done_shift_keeps_times, sc_done_shift_keeps_all_day, sc_done_shift_canonical_time_wins,
     sc_done_shift_without_reminder_starts_from_repeat_time,
+    sc_user_duration_moves_the_ping_to_the_end, sc_user_duration_equal_to_the_default_still_moves_the_ping,
+    sc_auto_slot_duration_does_not_move_the_ping, sc_auto_slot_with_another_value_does_not_move_the_ping,
 ]
 
 
@@ -593,6 +624,21 @@ async def test_done_without_a_reminder_starts_from_the_repeat_time():
     w = (await _both(sc_done_shift_without_reminder_starts_from_repeat_time))["written"]
     assert w["reminder"].endswith("T10:00") and w["reminder"][:10] >= _today(), w
     assert w["deadline"].endswith("T18:30"), w
+
+
+async def test_a_user_set_duration_moves_the_deadline_ping_to_the_end_of_the_task():
+    dl = _now() + timedelta(hours=4)
+    for sc, minutes in ((sc_user_duration_moves_the_ping_to_the_end, 90),
+                        (sc_user_duration_equal_to_the_default_still_moves_the_ping, 60)):
+        r = await _both(sc)
+        assert r["jobs"] == [("deadline", _wall(dl + timedelta(minutes=minutes)))], (sc.__name__, r)
+
+
+async def test_an_auto_slot_duration_does_not_move_the_ping():
+    want = _wall(_now() + timedelta(hours=4))
+    for sc in (sc_auto_slot_duration_does_not_move_the_ping, sc_auto_slot_with_another_value_does_not_move_the_ping):
+        r = await _both(sc)
+        assert r["jobs"] == [("deadline", want)], (sc.__name__, r)
 
 
 def test_callback_prefixes_differ_by_design():

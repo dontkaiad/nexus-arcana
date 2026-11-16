@@ -108,3 +108,24 @@ def test_split_head_tail_short_and_no_boundary():
     solid = "я" * 900
     h, t = wp._split_head_tail(solid)
     assert len(h) == 400 and h + t == solid
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duration,minutes", [
+    ("на 2 часа", 120), ("с 14 до 17", 180), ("полчаса", 30), ("1 час 30 минут", 90), (None, None), ("скоро", None),
+])
+async def test_the_work_parser_extracts_a_duration_like_nexus_tasks(duration, minutes):
+    """Сырое поле duration от LLM → минуты тем же детерминированным parse_duration_minutes, что у Задач."""
+    import json
+    _fresh()
+    reply = json.dumps({"title": "Расклад", "deadline": "2026-11-20T14:00", "category": "расклад",
+                        "type": "личная", "notes": None, "duration": duration})
+    with patch.object(wp, "ask_claude", AsyncMock(return_value=reply)), \
+         patch.object(wp, "get_effective_tz", AsyncMock(return_value=(3, "UTC+3"))):
+        data = await wp._parse_work_text("расклад завтра с 14 до 17", 3)
+    assert data["duration_min"] == minutes
+
+
+def test_the_work_prompt_asks_for_a_raw_duration():
+    from arcana.handlers.works import PARSE_WORK_SYSTEM
+    assert '"duration"' in PARSE_WORK_SYSTEM and "с 14 до 17" in PARSE_WORK_SYSTEM
