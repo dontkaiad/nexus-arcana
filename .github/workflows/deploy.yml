@@ -14,24 +14,44 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    # Только чтение: список запусков этого workflow и compare API для шага plan.
+    permissions:
+      contents: read
+      actions: read
     steps:
-      # Нужен только для шага plan: какие файлы изменил деплоимый коммит (main сквош-мерджится, один
-      # коммит на деплой). Код не исполняется, токен в репозитории не остаётся.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 2
-          persist-credentials: false
-
-      - name: Which bots does this commit touch
+      # Какие файлы изменились С ПОСЛЕДНЕГО УСПЕШНОГО ДЕПЛОЯ до деплоимого коммита (а не в последнем
+      # коммите): пуш из нескольких коммитов не теряет изменения в предыдущих. Код репозитория не
+      # нужен, поэтому checkout нет; токен — только в env шага, не в теле run.
+      - name: Which bots changed since the last successful deploy
         id: plan
         env:
           EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          files="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
-          nexus=false; arcana=false; zarya=false; note=""
-          if [ "$EVENT" = workflow_dispatch ] || [ -z "$files" ]; then
-            nexus=true; arcana=true; zarya=true; note="manual redeploy / all bots"
+          nexus=false; arcana=false; zarya=false; note=""; files=""; all=""
+          if [ "$EVENT" = workflow_dispatch ]; then
+            all="manual redeploy / all bots"
+          else
+            prev="$(gh run list --repo "$REPO" --workflow deploy.yml --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // empty' 2>/dev/null || true)"
+            if [ -z "$prev" ]; then
+              all="no previous successful deploy to compare with: all bots"
+            elif [ "$prev" = "$HEAD_SHA" ]; then
+              all="same commit as the last successful deploy: all bots"
+            else
+              cmp="$(gh api "repos/$REPO/compare/$prev...$HEAD_SHA" --jq '.status, ((.files // [])[].filename)' 2>/dev/null || true)"
+              status="$(head -n 1 <<<"$cmp")"
+              files="$(tail -n +2 <<<"$cmp")"
+              if [ "$status" != ahead ] || [ -z "$files" ]; then
+                all="could not list the changes since the last deploy: all bots"
+              elif [ "$(wc -l <<<"$files")" -ge 300 ]; then
+                all="300 or more changed files (the API list is cut): all bots"
+              fi
+            fi
+          fi
+          if [ -n "$all" ]; then
+            nexus=true; arcana=true; zarya=true; note="$all"
           elif grep -qE '^(core/|alembic/|alembic\.ini|docker/|Dockerfile|docker-compose\.yml|requirements|scripts/deploy\.sh|zarya/build-inputs\.txt)' <<<"$files"; then
             nexus=true; arcana=true; zarya=true; note="shared code: all bots"
           else
