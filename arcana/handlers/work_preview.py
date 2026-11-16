@@ -385,14 +385,21 @@ async def _parse_clarification(text: str, tz_offset: int) -> dict:
     return out
 
 
-def _auto_reminder(deadline: str) -> str:
-    """Дефолтное напоминание = дедлайн - 1 день (паттерн Nexus)."""
+def _auto_reminder(deadline: str, tz_offset: Optional[int] = None) -> str:
+    """Дефолтное напоминание = дедлайн - 1 день (паттерн Nexus).
+
+    С ``tz_offset``: если это время уже прошло, возвращает "" — как Nexus
+    ``_default_reminder`` (→ None). Иначе периодический re-arm (#210) через минуту
+    прислал бы ложное «⏰ Пропущено», а дедлайн-пинг (#69) не поставился бы."""
     iso = deadline if "T" in deadline else f"{deadline}T09:00"
     try:
-        dt = datetime.strptime(iso, "%Y-%m-%dT%H:%M")
+        dt = datetime.strptime(iso[:16], "%Y-%m-%dT%H:%M")
     except Exception:
         return iso
-    return (dt - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+    rem = dt - timedelta(days=1)
+    if tz_offset is not None and rem.replace(tzinfo=timezone(timedelta(hours=tz_offset))) <= datetime.now(timezone.utc):
+        return ""
+    return rem.strftime("%Y-%m-%dT%H:%M")
 
 
 def _first_recurring_reminder(repeat_time: Optional[str], tz_offset: int) -> str:
@@ -669,7 +676,7 @@ async def cb_work_save(call: CallbackQuery) -> None:
     if not reminder and repeat != "Нет":
         reminder = _first_recurring_reminder(data.get("repeat_time"), int(tz_offset))
     if not reminder and data.get("deadline"):
-        reminder = _auto_reminder(data["deadline"])
+        reminder = _auto_reminder(data["deadline"], int(tz_offset))
     if reminder:
         try:
             import asyncio as _asyncio
@@ -704,6 +711,22 @@ async def cb_work_save(call: CallbackQuery) -> None:
             await _asyncio.to_thread(_set_reminder)
         except Exception as e:
             logger.warning("schedule reminder on save failed: %s", e)
+    elif data.get("deadline"):
+        # Напоминания нет (дедлайн скоро) → пинг в сам дедлайн, как Nexus (#69).
+        try:
+            from arcana.bot import arcana_reminder_flow
+            from core.user_manager import get_tg_ids_for_user
+            recipients = await get_tg_ids_for_user(data.get("user_id") or "")
+            await arcana_reminder_flow.schedule_deadline_check(
+                chat_id=call.message.chat.id,
+                title=data.get("title") or "Работа",
+                deadline_dt=data["deadline"],
+                page_id=result,
+                tz_offset=int(tz_offset),
+                recipients=recipients or None,
+            )
+        except Exception as e:
+            logger.warning("schedule deadline on save failed: %s", e)
 
     deadline_disp = (data.get("deadline") or "без даты").replace("T", " ")
     reminder_disp = (reminder or "нет").replace("T", " ")

@@ -168,6 +168,19 @@ def _work_local_date(dt: Optional[Any], tz_offset: int) -> Optional[date]:
         return None
 
 
+def _work_deadline_label(dt: Optional[Any], tz_offset: int) -> str:
+    """Подпись дедлайна в ЛОКАЛЬНОМ поясе пользователя: 'YYYY-MM-DD HH:MM', а для
+    «весь день» (полночь локального дня) — только 'YYYY-MM-DD'. Раньше брали
+    ``deadline_iso[:16]`` — это UTC: в МСК дедлайн 19:45 показывался как 16:45, а
+    «весь день» — вчерашним числом 21:00. Общий код с дедлайн-пингом
+    (arcana.reminder_adapter.work_deadline_wall)."""
+    from arcana.reminder_adapter import work_deadline_wall
+    try:
+        return work_deadline_wall(dt, tz_offset).replace("T", " ")
+    except Exception:
+        return ""
+
+
 def _work_local_time(dt: Optional[Any], tz_offset: int) -> Optional[str]:
     if not dt:
         return None
@@ -891,7 +904,7 @@ async def get_arcana_works(
             "priority": w.priority,
             "category": w.category,
             "deadline": w.deadline_iso,
-            "deadline_label": w.deadline_iso[:16].replace("T", " ") if w.deadline_iso else "",
+            "deadline_label": _work_deadline_label(w.deadline_dt, tz_offset),
             "reminder": reminder_iso,
             "reminder_time": _work_local_time(w.reminder_dt, tz_offset),
             "is_overdue": _is_overdue(w),

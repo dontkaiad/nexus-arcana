@@ -328,3 +328,90 @@ async def test_find_by_id_populates_deadline_iso(engine):
     assert w.deadline_iso != ""
     assert "2026" in w.deadline_iso
     assert w.deadline_dt is not None
+
+
+# ── выборки для restore (общий движок напоминаний, паритет с Nexus) ──────────
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)   # sqlite хранит наивное UTC
+
+
+@pytest.mark.asyncio
+async def test_active_with_past_reminder_only_open_and_past(engine):
+    from datetime import timedelta
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    past = _insert_work(engine, title="прошло", reminder=_utc_now() - timedelta(hours=2))
+    _insert_work(engine, title="будущее", reminder=_utc_now() + timedelta(hours=2))
+    _insert_work(engine, title="без reminder")
+    _insert_work(engine, title="закрыто", status_code="done", reminder=_utc_now() - timedelta(hours=2))
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        got = await PgWorksRepo().active_with_past_reminder("u1")
+    assert [w.id for w in got] == [past]
+
+
+@pytest.mark.asyncio
+async def test_active_with_future_deadline_no_reminder(engine):
+    from datetime import timedelta
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    want = _insert_work(engine, title="пинг", deadline=_utc_now() + timedelta(hours=5))
+    _insert_work(engine, title="есть reminder", deadline=_utc_now() + timedelta(hours=5),
+                 reminder=_utc_now() + timedelta(hours=1))
+    _insert_work(engine, title="дедлайн прошёл", deadline=_utc_now() - timedelta(hours=5))
+    _insert_work(engine, title="закрыто", status_code="archived", deadline=_utc_now() + timedelta(hours=5))
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        got = await PgWorksRepo().active_with_future_deadline_no_reminder("u1")
+    assert [w.id for w in got] == [want]
+
+
+@pytest.mark.asyncio
+async def test_active_recurring_without_reminder(engine):
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = _insert_work(engine, title="серия")
+    other = _insert_work(engine, title="разовая")
+    with engine.begin() as conn:
+        conn.execute(works.update().where(works.c.id == int(wid)).values(repeat_time="10:00"))
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        got = await PgWorksRepo().active_recurring_without_reminder("u1")
+    assert [w.id for w in got] == [wid] and other not in [w.id for w in got]
+
+
+@pytest.mark.asyncio
+async def test_clear_and_set_reminder(engine):
+    from datetime import timedelta
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    wid = _insert_work(engine, reminder=_utc_now() + timedelta(hours=1))
+    repo = PgWorksRepo()
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=engine):
+        assert await repo.clear_reminder(wid) is True
+        assert (await repo.find_by_id(wid)).reminder_dt is None
+        assert await repo.set_reminder(wid, datetime(2026, 12, 1, 7, 0, tzinfo=timezone.utc)) is True
+        assert (await repo.find_by_id(wid)).reminder_dt.hour == 7
+        assert await repo.clear_reminder("99999") is False
+
+
+def _written_deadline(tz_offset):
+    """Что репозиторий отправил бы в UPDATE works.deadline (aware-datetime). SQLite смещение
+    теряет, поэтому берём значение из выражения, а не из БД."""
+    from arcana.repos.pg_works_repo import PgWorksRepo
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = None
+    conn.execute.return_value.rowcount = 1
+    eng = MagicMock()
+    eng.begin.return_value.__enter__.return_value = conn
+    with patch("arcana.repos.pg_works_repo.get_engine", return_value=eng):
+        PgWorksRepo()._set_deadline_sync("5", date(2026, 12, 31), tz_offset)
+    updates = [c.args[0] for c in conn.execute.call_args_list if hasattr(c.args[0], "compile")
+               and "UPDATE" in str(c.args[0])]
+    return updates[-1].compile().params["deadline"]
+
+
+def test_set_deadline_with_tz_keeps_local_midnight():
+    """Перенос из Mini App: «без времени» = полночь ЛОКАЛЬНОГО дня (МСК → 21:00 UTC накануне),
+    а не UTC-полночь — иначе в показе 03:00 и дедлайн-пинг в 03:00."""
+    got = _written_deadline(3).astimezone(timezone.utc)
+    assert (got.day, got.hour) == (30, 21)
+
+
+def test_set_deadline_without_tz_keeps_legacy_utc_midnight():
+    got = _written_deadline(None).astimezone(timezone.utc)
+    assert (got.day, got.hour) == (31, 0)

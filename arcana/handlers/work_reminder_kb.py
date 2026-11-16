@@ -165,6 +165,19 @@ async def _handle_recurring_work_done(
             )
         except Exception as e:
             logger.warning("_handle_recurring_work_done: schedule failed: %s", e)
+    elif new_deadline:
+        # Напоминания нет → дедлайн-пинг нового цикла (как Nexus, #69).
+        try:
+            from core.user_manager import get_user_id, get_tg_ids_for_user
+            owner_user_id = await get_user_id(message.from_user.id)
+            recipients = await get_tg_ids_for_user(owner_user_id or "")
+            await arcana_reminder_flow.schedule_deadline_check(
+                chat_id=message.chat.id, title=title, deadline_dt=new_deadline,
+                page_id=work_id, tz_offset=tz_offset,
+                recipients=recipients or None,
+            )
+        except Exception as e:
+            logger.warning("_handle_recurring_work_done: deadline schedule failed: %s", e)
 
     return (new_deadline or new_reminder or "")[:10]
 
@@ -341,6 +354,8 @@ async def _do_reschedule(
         # перенесли напоминание (см. work_preview.cb_work_save).
         owner_user_id = await get_user_id(uid)
         recipients = await get_tg_ids_for_user(owner_user_id or "")
+        # Новое напоминание заменяет прежние jobs: дедлайн-пинг при reminder не нужен (#69).
+        arcana_reminder_flow.remove_jobs(work_id)
         ok = await arcana_reminder_flow.schedule_reminder(
             chat_id=message.chat.id,
             title=title,

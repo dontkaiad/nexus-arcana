@@ -139,14 +139,14 @@ async def test_clarification_updates_deadline_and_edits_preview():
     msg.bot.edit_message_text.assert_awaited()
 
 
-@pytest.mark.asyncio
-async def test_work_save_creates_notion_and_schedules_reminder():
+async def _save_work(deadline: str):
+    """Прогнать cb_work_save для Работы с данным дедлайном → (flow-мок, create-мок)."""
     _fresh_db()
     slug = wp._make_slug(42)
     wp._pending_set(42, slug, {
         "title": "Ритуал", "category": "✨ Ритуал", "priority": "Важно",
         "work_type": "🤝 Клиентская", "client_name": "Маша", "client_id": "c1",
-        "deadline": "2026-05-05", "reminder": None,
+        "deadline": deadline, "reminder": None,
         "msg_id": 999, "chat_id": 100, "user_id": "u",
     })
 
@@ -162,6 +162,7 @@ async def test_work_save_creates_notion_and_schedules_reminder():
 
     flow = MagicMock()
     flow.schedule_reminder = AsyncMock(return_value=True)
+    flow.schedule_deadline_check = AsyncMock(return_value=True)
     fake_bot = MagicMock(arcana_reminder_flow=flow)
 
     with patch.object(wp._works_repo, "create",
@@ -171,14 +172,35 @@ async def test_work_save_creates_notion_and_schedules_reminder():
                AsyncMock(return_value=3)), \
          patch("core.message_pages.save_message_page", AsyncMock()):
         await wp.cb_work_save(call)
-
     add_mock.assert_awaited_once()
+    return flow
+
+
+@pytest.mark.asyncio
+async def test_work_save_creates_notion_and_schedules_reminder():
+    from datetime import date, timedelta
+    deadline = (date.today() + timedelta(days=10)).isoformat()
+    flow = await _save_work(deadline)
     flow.schedule_reminder.assert_awaited_once()
+    flow.schedule_deadline_check.assert_not_awaited()   # есть reminder → дедлайн-пинг не нужен (#69)
     # reminder = deadline - 1 день
     kwargs = flow.schedule_reminder.call_args.kwargs
-    assert kwargs["reminder_dt"].startswith("2026-05-04")
+    assert kwargs["reminder_dt"].startswith((date.today() + timedelta(days=9)).isoformat())
     # pending удалён
     assert wp._pending_get(42) is None
+
+
+@pytest.mark.asyncio
+async def test_work_save_near_deadline_pings_at_deadline_not_a_stale_reminder():
+    """Дедлайн завтра → «дедлайн − 1 день» уже в прошлом. Как у Nexus (_default_reminder → None):
+    напоминания нет, вместо него дедлайн-пинг. Иначе periodic re-arm прислал бы ложное
+    «⏰ Пропущено» сразу после создания."""
+    from datetime import datetime, timedelta, timezone
+    soon = (datetime.now(timezone(timedelta(hours=3))) + timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M")
+    flow = await _save_work(soon)
+    flow.schedule_reminder.assert_not_awaited()
+    flow.schedule_deadline_check.assert_awaited_once()
+    assert flow.schedule_deadline_check.call_args.kwargs["deadline_dt"] == soon
 
 
 @pytest.mark.asyncio

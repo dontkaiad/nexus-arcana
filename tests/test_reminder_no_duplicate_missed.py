@@ -191,7 +191,7 @@ async def test_restore_pass4_rearms_deadline_ping(monkeypatch):
          patch.object(tasks, "_scheduler", MagicMock()), \
          patch.object(tasks, "_bot", MagicMock()), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
-         patch.object(tasks, "_schedule_deadline_check", _fake_deadline), \
+         patch.object(tasks._flow, "schedule_deadline_check", _fake_deadline), \
          patch.object(pgt.PgTasksRepo, "active_with_future_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder", AsyncMock(return_value=[])), \
          patch.object(pgt.PgTasksRepo, "active_recurring_without_reminder", AsyncMock(return_value=[])), \

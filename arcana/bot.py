@@ -30,76 +30,24 @@ logger = logging.getLogger("arcana.bot")
 _photo_pending: dict = {}  # uid → (message_id, user_id, ts)
 _PHOTO_TTL = 120  # 2 минуты
 
-# Глобальная инстанция планировщика напоминаний для Arcana (см. core/reminder_scheduler.py).
-# Инициализируется в main() после старта APScheduler.
-from core.reminder_scheduler import ReminderScheduler
-arcana_reminder_flow = ReminderScheduler(callback_prefix="work")
+# ЕДИНЫЙ движок напоминаний/дедлайнов (core/reminder_scheduler.py) — тот же, что у Nexus;
+# отличия Работы — в arcana/reminder_adapter.py. Инициализируется в main() после старта APScheduler.
+from arcana.reminder_adapter import arcana_reminder_flow  # noqa: E402,F401  (re-export: на него ссылаются хендлеры и тесты)
 
 
-async def restore_work_reminders() -> int:
-    """Пере-планировать напоминания Работ из PG на старте (паритет с Nexus
-    restore_reminders_on_startup).
+async def restore_work_reminders(periodic: bool = False) -> int:
+    """Восстановить jobs Работ из PG — те же проходы 1–4, что и у Nexus
+    (``restore_reminders_on_startup``), общий код: core.reminder_scheduler.
 
-    APScheduler-джобы живут в памяти и теряются при рестарте; колонка
-    works.reminder в PG переживает рестарт, но без этого restore никто её не
-    перечитывает. Берём только БУДУЩИЕ напоминания не-done/не-archived Работ
-    (active_with_future_reminder фильтрует reminder > now()). Прошедшие НЕ
-    воскрешаем — чтобы не слать «missed» при каждом рестарте.
+    1. будущее напоминание → планируем;  2. прошедшее → «⏰ Пропущено» (одноразовые:
+    обнуляем reminder; повторяющиеся: сдвиг серии);  3. повтор без reminder → оживляем;
+    4. будущий дедлайн без reminder → дедлайн-пинг (#212).
 
-    Ключ джобы (`reminder_{page_id}`, page_id=str(work.id)) совпадает с тем,
-    что ставит cb_work_save → replace_existing, без дублей.
-
-    Группируем allowed_ids по user_id (#202/#306: Кай делит один user_id
-    между двумя TG-аккаунтами — тот же паттерн, что чинили в
-    nexus/handlers/tasks.py restore_reminders_on_startup). Раньше цикл шёл
-    по tg_id и планировал КАЖДУЮ Работу заново на каждый tg_id с ОДНИМ
-    job_id `reminder_<id>` → replace_existing на втором tg_id перетирал
-    первый, и напоминание уходило только в чат ПОСЛЕДНЕГО tg_id из
-    allowed_ids (а не туда, где Кай реально смотрит). Теперь один проход
-    на user_id, рассылка во все его чаты через recipients.
-    """
-    from core.config import config as _cfg
-    from core.user_manager import get_user
-    from core.shared_handlers import get_user_tz
-    from arcana.repos.pg_works_repo import PgWorksRepo
-
-    _pg = PgWorksRepo()
-    restored = 0
-
-    _groups: dict = {}
-    for tg_id in _cfg.allowed_ids:
-        user_data = await get_user(tg_id)
-        if not user_data or not user_data.get("permissions", {}).get("arcana", False):
-            continue
-        user_id = user_data.get("user_id", "")
-        if not user_id:
-            continue
-        _groups.setdefault(user_id, []).append(tg_id)
-
-    for user_id, tg_ids in _groups.items():
-        try:
-            primary_tg = tg_ids[0]
-            tz_offset = await get_user_tz(primary_tg)
-            for w in await _pg.active_with_future_reminder(user_id):
-                if not w.reminder_dt:
-                    continue
-                from core.date_extract import dt_to_local_wall
-                # PG отдаёт настоящий UTC (соглашение Nexus, #267) → локальное настенное
-                reminder_iso = dt_to_local_wall(w.reminder_dt, int(tz_offset))
-                ok = await arcana_reminder_flow.schedule_reminder(
-                    chat_id=primary_tg,
-                    title=w.title or "Работа",
-                    reminder_dt=reminder_iso,
-                    page_id=str(w.id),
-                    tz_offset=int(tz_offset),
-                    recipients=tg_ids,
-                )
-                if ok:
-                    restored += 1
-        except Exception as e:
-            logger.warning("restore_work_reminders for user_id=%s failed: %s", user_id, e)
-    logger.info("restored %d work reminders on startup", restored)
-    return restored
+    Зовётся на старте и каждые 90 с (``periodic=True``, #210): APScheduler теряет
+    jobs при рестарте, а Работы, созданные/перенесённые из Mini App или MCP (они живут
+    в другом процессе и свой flow не инициализируют), в Arcana попадают только через
+    этот sweep. Возвращает число (пере)планированных/отправленных."""
+    return await arcana_reminder_flow.restore(periodic=periodic)
 
 
 def create_dp_and_bot():
@@ -475,15 +423,27 @@ async def main():
         # сможет ставить APScheduler-job на дедлайн напоминания работы.
         arcana_reminder_flow.init(bot, scheduler)
         logger.info("arcana_reminder_flow ready (callback_prefix=work)")
-        # Restore Work-напоминаний из PG (apscheduler-джобы не переживают рестарт).
-        try:
-            await restore_work_reminders()
-        except Exception as e:
-            logger.warning("restore_work_reminders failed: %s", e)
+        # Периодический re-arm из PG каждые 90 с (#210) — как у Nexus: подхватывает Работы
+        # из Mini App/MCP (другой процесс) и всё, что потерялось при рестарте. Стартовый
+        # restore — в _on_startup (после старта polling, как у Nexus).
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler.add_job(
+            restore_work_reminders,
+            kwargs={"periodic": True},
+            trigger=IntervalTrigger(seconds=90),
+            id="work_reminder_resync",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     except ImportError:
         logger.warning("apscheduler not installed — monthly reminder disabled")
 
     async def _on_startup(**kwargs) -> None:
+        try:
+            await restore_work_reminders()  # jobs не переживают рестарт; «Пропущено» шлём уже при живом боте
+        except Exception as e:
+            logger.warning("restore_work_reminders failed: %s", e)
         log_version("arcana")  # без пинга в группу: деплой сообщает CI, падение сообщает host-монитор
         start_heartbeat()  # фоновый heartbeat для docker healthcheck
 

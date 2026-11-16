@@ -1207,7 +1207,7 @@ async def arcana_work_postpone(
     w = await _works_pg_repo.find_by_id(work_id)
     if not w:
         raise HTTPException(status_code=404, detail="work not found")
-    today_date, _tz_offset = await today_user_tz(tg_id)
+    today_date, tz_offset = await today_user_tz(tg_id)
 
     if body.date:
         try:
@@ -1221,9 +1221,22 @@ async def arcana_work_postpone(
         shift_days = body.days if body.days is not None else 1
         new_date = base + timedelta(days=shift_days)
 
-    ok = await _works_pg_repo.set_deadline(work_id, new_date)
+    ok = await _works_pg_repo.set_deadline(work_id, new_date, tz_offset=int(tz_offset))
     if not ok:
         raise HTTPException(status_code=500, detail="failed to update deadline")
+    if not w.reminder_dt:
+        # Напоминания нет → пинг в новый дедлайн (#69). Живой job есть только в процессе
+        # Arcana; здесь (процесс Nexus) flow не инициализирован и вызов — no-op, а job
+        # поставит и поправит periodic re-arm Arcana (≤90 с, проход 4).
+        try:
+            from arcana.bot import arcana_reminder_flow
+            arcana_reminder_flow.remove_jobs(work_id)
+            await arcana_reminder_flow.schedule_deadline_check(
+                chat_id=tg_id, title=w.title, deadline_dt=new_date.isoformat(),
+                page_id=work_id, tz_offset=int(tz_offset),
+            )
+        except Exception as e:  # noqa: BLE001 — sweep подхватит
+            logger.warning("arcana work deadline ping schedule failed: %s", e)
     await notify_user(
         tg_id,
         f"📅 Перенесла на {new_date.isoformat()}: <b>{_esc(w.title)}</b>",
@@ -1312,6 +1325,22 @@ async def arcana_work_create(
             )
         except Exception as e:  # noqa: BLE001 — restore на старте подхватит
             logger.warning("arcana work reminder schedule failed: %s", e)
+    elif deadline_dt:
+        # Напоминания нет → пинг в дедлайн (#69). Mini App живёт в процессе Nexus, где
+        # flow Arcana не инициализирован: вызов — no-op, а job ставит periodic re-arm
+        # Arcana (≤90 с, проход 4). Вызов оставлен для процесса, где flow готов.
+        try:
+            from arcana.bot import arcana_reminder_flow
+            from arcana.reminder_adapter import work_deadline_wall
+            await arcana_reminder_flow.schedule_deadline_check(
+                chat_id=tg_id,
+                title=body.title.strip(),
+                deadline_dt=work_deadline_wall(deadline_dt, int(tz_offset)),
+                page_id=str(work_id),
+                tz_offset=int(tz_offset),
+            )
+        except Exception as e:  # noqa: BLE001 — sweep подхватит
+            logger.warning("arcana work deadline ping schedule failed: %s", e)
 
     await notify_user(tg_id, f"⚡ Создала работу: <b>{_esc(body.title.strip())}</b>", bot="arcana")
     return {"ok": True, "id": work_id, "reminder": reminder_iso}

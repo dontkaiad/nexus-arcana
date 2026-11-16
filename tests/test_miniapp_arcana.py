@@ -1630,3 +1630,15 @@ def test_miniapp_create_writes_real_utc(client):
     assert r.status_code == 200, r.text
     assert _utc(create.await_args.kwargs["deadline"]) == "2026-11-01T16:45"
     assert _utc(eng.params[0]["reminder"]) == "2026-11-01T16:30"
+
+
+# ── deadline_label — локальный пояс, не UTC ─────────────────────────────────
+
+def test_work_deadline_label_is_local_not_utc():
+    from datetime import datetime as _dt, timezone as _tzu
+    from miniapp.backend.routes.arcana_today import _work_deadline_label
+    # 19:45 МСК хранится как 16:45 UTC — раньше в подписи показывалось 16:45
+    assert _work_deadline_label(_dt(2026, 11, 1, 16, 45, tzinfo=_tzu.utc), 3) == "2026-11-01 19:45"
+    # «весь день» = полночь локального дня (21:00 UTC накануне) → только дата, и день верный
+    assert _work_deadline_label(_dt(2026, 10, 31, 21, 0, tzinfo=_tzu.utc), 3) == "2026-11-01"
+    assert _work_deadline_label(None, 3) == ""

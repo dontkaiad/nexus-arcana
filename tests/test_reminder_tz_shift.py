@@ -85,7 +85,7 @@ async def test_restore_pass1_utc_reminder_no_shift():
          patch.object(tasks, "_scheduler", MagicMock()), \
          patch.object(tasks, "_bot", MagicMock()), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
-         patch.object(tasks, "_schedule_reminder", AsyncMock()) as m_sched, \
+         patch.object(tasks._flow, "schedule_reminder", AsyncMock()) as m_sched, \
          patch.object(pgt.PgTasksRepo, "active_with_future_reminder",
                       AsyncMock(return_value=[task])), \
          patch.object(pgt.PgTasksRepo, "active_with_past_reminder",

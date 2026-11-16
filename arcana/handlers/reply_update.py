@@ -99,31 +99,44 @@ async def handle_reply_update(message: Message, user_id: str = "") -> bool:
                 # #306: рассылаем во все чаты владельца, не только в тот,
                 # откуда пришёл reply (см. work_preview.cb_work_save).
                 recipients = await get_tg_ids_for_user(user_id or "")
-                await arcana_reminder_flow.schedule_reminder(
-                    chat_id=message.chat.id,
-                    title=applied.get("Работа") or "Работа",
-                    reminder_dt=reminder,
-                    page_id=page_id,
-                    tz_offset=int(reminder_tz_offset),
-                    recipients=recipients or None,
-                )
-
-                def _set_reminder():
-                    # `reminder` — наивная строка ЛОКАЛЬНОГО времени юзера.
-                    # Вставка naive datetime в timestamptz без явного tzinfo
-                    # молча трактуется как UTC (тот же баг, см. правку
-                    # PgWorksRepo._set_props_sync выше).
-                    rd = datetime.strptime(reminder, "%Y-%m-%dT%H:%M").replace(
-                        tzinfo=_tz(timedelta(hours=int(reminder_tz_offset)))
+                reminder_tz = _tz(timedelta(hours=int(reminder_tz_offset)))
+                arcana_reminder_flow.remove_jobs(page_id)   # старые reminder/deadline-jobs — под новую дату
+                if datetime.strptime(reminder, "%Y-%m-%dT%H:%M").replace(tzinfo=reminder_tz) <= datetime.now(_tz.utc):
+                    # «Дедлайн − 1 день» уже в прошлом (дедлайн скоро). Как у Nexus
+                    # (_default_reminder → None): напоминания нет, пингуем в сам дедлайн.
+                    await arcana_reminder_flow.schedule_deadline_check(
+                        chat_id=message.chat.id,
+                        title=applied.get("Работа") or "Работа",
+                        deadline_dt=iso,
+                        page_id=page_id,
+                        tz_offset=int(reminder_tz_offset),
+                        recipients=recipients or None,
                     )
-                    with get_engine().begin() as conn:
-                        conn.execute(
-                            t_works.update()
-                            .where(t_works.c.id == int(page_id))
-                            .values(reminder=rd)
-                        )
-                await _asyncio.to_thread(_set_reminder)
-                summary += f"\n🔔 Напомню: {reminder.replace('T', ' ')}"
+                    summary += f"\n⏰ Пингану в дедлайн: {iso.replace('T', ' ')}"
+                else:
+                    await arcana_reminder_flow.schedule_reminder(
+                        chat_id=message.chat.id,
+                        title=applied.get("Работа") or "Работа",
+                        reminder_dt=reminder,
+                        page_id=page_id,
+                        tz_offset=int(reminder_tz_offset),
+                        recipients=recipients or None,
+                    )
+
+                    def _set_reminder():
+                        # `reminder` — наивная строка ЛОКАЛЬНОГО времени юзера.
+                        # Вставка naive datetime в timestamptz без явного tzinfo
+                        # молча трактуется как UTC (тот же баг, см. правку
+                        # PgWorksRepo._set_props_sync выше).
+                        rd = datetime.strptime(reminder, "%Y-%m-%dT%H:%M").replace(tzinfo=reminder_tz)
+                        with get_engine().begin() as conn:
+                            conn.execute(
+                                t_works.update()
+                                .where(t_works.c.id == int(page_id))
+                                .values(reminder=rd)
+                            )
+                    await _asyncio.to_thread(_set_reminder)
+                    summary += f"\n🔔 Напомню: {reminder.replace('T', ' ')}"
             except Exception as e:
                 logger.warning("auto-reminder on reply failed: %s", e)
 

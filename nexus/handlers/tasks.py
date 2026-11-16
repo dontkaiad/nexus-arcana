@@ -25,6 +25,7 @@ from nexus.handlers.utils import react
 from core.layout import maybe_convert
 from core.utils import cancel_button, secondary_button
 from core.task_reminder_msg import save_task_reminder, delete_task_reminder
+from core.reminder_scheduler import ReminderAdapter, ReminderItem, ReminderScheduler
 from core.duration import parse_duration_minutes, format_duration
 from core.location import (
     CITY_TZ as _CITY_TZ,
@@ -303,291 +304,135 @@ def init_scheduler(bot: Bot) -> None:
 
 def _remove_task_jobs(task_id: str) -> None:
     """Remove all APScheduler jobs for a task (reminder + deadline)."""
-    if not _scheduler:
-        return
-    for prefix in ("reminder_", "deadline_"):
-        try:
-            _scheduler.remove_job(f"{prefix}{task_id}")
-            logger.info("removed job %s%s", prefix, task_id)
-        except Exception:
-            pass
+    _flow.remove_jobs(task_id)
+
+
+class _NexusReminderAdapter(ReminderAdapter):
+    """Различия Задачи Nexus для общего движка core.reminder_scheduler.
+
+    Все обращения к _repo/_bot/save_task_reminder/_get_user_tz/_care идут через
+    глобалы модуля в момент вызова (а не через замыкание при импорте) — на этом
+    держатся патчи в тестах и ленивая инициализация scheduler'а."""
+
+    name = "task"
+    callback_prefix = "task"
+    default_title = "Задача"
+    ask_reminder = "Сделано?"
+    ask_deadline = "Сделал?"
+
+    def reminder_kb(self, task_id: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
+                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
+            ],
+            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
+        ])
+
+    def deadline_kb(self, task_id: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
+                InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
+            ],
+            [InlineKeyboardButton(text="🔧 В процессе", callback_data=f"task_wip_{task_id}")],
+        ])
+
+    def now(self) -> datetime:
+        return _now()
+
+    async def get(self, task_id: str):
+        return await _repo.retrieve_page(task_id)
+
+    async def is_muted(self, raw, tz_offset: int) -> bool:
+        # Уход за котами: в период ухода напоминания задач ситтера владельцу молчат
+        # (задачу ведёт ситтер; о просрочке предупредит core.care.send_overdue_alerts).
+        return await asyncio.to_thread(_care.is_muted, raw, tz_offset)
+
+    async def on_fire(self, task_id: str) -> None:
+        await _repo.set_in_progress(task_id)
+
+    async def after_sent(self, task_id: str, first_message, title: str) -> None:
+        await save_task_reminder(task_id, first_message.chat.id, first_message.message_id, title)
+
+    async def clear_reminder(self, task_id: str) -> None:
+        await _repo.clear_reminder(task_id)
+
+    async def set_reminder(self, task_id: str, wall: str, tz_offset: int) -> None:
+        await _repo.set_props(task_id, {"Напоминание": _date_with_tz(wall, tz_offset)})
+
+    async def shift_series(self, item: ReminderItem, new_reminder_wall: str,
+                           new_deadline_day: Optional[str], tz_offset: int) -> None:
+        props: dict = {"Напоминание": _date_with_tz(new_reminder_wall, tz_offset),
+                       "Статус": _status("Not started")}
+        if new_deadline_day:
+            props["Дедлайн"] = _date_with_tz(new_deadline_day, tz_offset)
+        await _repo.set_props(item.id, props)
+
+    async def owner_groups(self):
+        # Два TG-аккаунта Кай делят один user_id (#202): один проход на user_id,
+        # рассылка во все его чаты (recipients) — иначе второй проход
+        # replace_existing перетирал бы job первого.
+        from core.config import config
+        from core.user_manager import get_user
+        groups: dict = {}
+        tz_by_tg: dict = {}
+        for tg in config.allowed_ids:
+            ud = await get_user(tg)
+            if not ud:
+                continue
+            uid = ud.get("user_id", "")
+            if not uid:
+                continue
+            groups.setdefault(uid, []).append(tg)
+            try:
+                tz_by_tg[tg] = await _get_user_tz(tg)
+            except Exception:
+                tz_by_tg[tg] = 3
+        return groups, tz_by_tg
+
+    async def fetch_future_reminder(self, user_id: str):
+        from nexus.repos.pg_tasks_repo import PgTasksRepo
+        return await PgTasksRepo().active_with_future_reminder(user_id)
+
+    async def fetch_past_reminder(self, user_id: str):
+        from nexus.repos.pg_tasks_repo import PgTasksRepo
+        return await PgTasksRepo().active_with_past_reminder(user_id)
+
+    async def fetch_recurring_no_reminder(self, user_id: str):
+        from nexus.repos.pg_tasks_repo import PgTasksRepo
+        return await PgTasksRepo().active_recurring_without_reminder(user_id)
+
+    async def fetch_future_deadline_no_reminder(self, user_id: str):
+        from nexus.repos.pg_tasks_repo import PgTasksRepo
+        return await PgTasksRepo().active_with_future_deadline_no_reminder(user_id)
+
+    def to_item(self, task, tz_offset: int) -> ReminderItem:
+        return ReminderItem(
+            id=task.id,
+            title=task.title or self.default_title,
+            repeat=task.repeat or "Нет",
+            repeat_time=task.repeat_time or "",
+            reminder_wall=_to_local_wall(task.reminder, tz_offset) if task.reminder else "",
+            deadline_wall=_deadline_wall(task, tz_offset),
+            duration_min=task.duration_min,
+            raw=task,
+        )
+
+
+# ЕДИНЫЙ движок напоминаний (core/reminder_scheduler.py) — тот же, что у Arcana.
+# bot/scheduler читаются лениво из глобалов модуля (init_scheduler присваивает их позже).
+_flow = ReminderScheduler(adapter=_NexusReminderAdapter())
+_flow.bind(lambda: _bot, lambda: _scheduler)
 
 
 async def restore_reminders_on_startup(periodic: bool = False) -> None:
-    """Восстановить APScheduler jobs для задач с напоминаниями.
+    """Восстановить APScheduler jobs из PG: проходы 1–4 (логика — в core.reminder_scheduler).
 
-    Проход 1: задачи с будущим напоминанием — планируем как есть.
-    Проход 2: задачи с прошедшим напоминанием —
-              одноразовые: шлём «⏰ Пропущено» + обнуляем reminder;
-              повторяющиеся: сдвигаем до ближайшей будущей даты + шлём увед.
-    Проход 3: задачи с repeat_time, но reminder IS NULL — оживляем,
-              вычисляем первый future-run, записываем в PG и планируем.
-    Проход 4: задачи с будущим deadline и без reminder (#212) —
-              пересобираем дедлайн-пинг (job тоже теряется при рестарте).
-
-    ``periodic=True`` — вызов из интервального re-arm (#210), не со старта:
-    APScheduler теряет in-memory job'ы при рестарте, поэтому pass 1/3 гоняем
-    периодически (идемпотентны: ``replace_existing`` / reminder IS NULL).
-    Pass 2 для ПОВТОРЯЮЩИХСЯ в periodic-режиме пропускаем — иначе sweep
-    через несколько минут после живого «🔔 Напоминание» пришлёт ещё и
-    «⏰ Пропущено … переношу», пока пользователь не нажал кнопку. Пропущенные
-    повторяющиеся подхватит pass 2 на ближайшем рестарте.
-    """
-    from core.config import config
-    from core.user_manager import get_user
-    from nexus.repos.pg_tasks_repo import PgTasksRepo as _PgTasksRepo
-
-    if not _scheduler or not _bot:
-        logger.warning("restore_reminders_on_startup: scheduler/bot not ready")
-        return
-
-    _pg = _PgTasksRepo()
-    now_utc = datetime.now(timezone.utc)
-    restored = 0
-
-    # Группируем allowed_ids по user_id: два TG-аккаунта Кай делят один
-    # user_id (#202). Раньше цикл шёл по tg_id и планировал одну задачу по
-    # разу на каждый аккаунт с ОДНИМ job_id `reminder_<task>` → второй проход
-    # replace_existing перетирал первый, напоминание уходило только в
-    # последний чат из allowed_ids. Теперь — один проход на user_id, рассылка
-    # во все его чаты (recipients).
-    _groups: dict = {}
-    _tz_by_tg: dict = {}
-    for _tg in config.allowed_ids:
-        _ud = await get_user(_tg)
-        if not _ud:
-            continue
-        _uid = _ud.get("user_id", "")
-        if not _uid:
-            continue
-        _groups.setdefault(_uid, []).append(_tg)
-        try:
-            _tz_by_tg[_tg] = await _get_user_tz(_tg)
-        except Exception:
-            _tz_by_tg[_tg] = 3
-
-    for user_id, tgids in _groups.items():
-        try:
-            tg_id = tgids[0]  # primary chat для одиночных send/логов
-            tz_offset = _tz_by_tg.get(tg_id, 3)
-
-            # ── Проход 1: будущие напоминания ────────────────────────────────────
-            for task in await _pg.active_with_future_reminder(user_id):
-                try:
-                    if await asyncio.to_thread(_care.is_muted, task, tz_offset):
-                        continue            # уход за котами: напоминание владельцу молчит
-                    task_id = task.id
-                    title = task.title or "Задача"
-                    reminder_start = task.reminder
-                    if reminder_start:
-                        await _schedule_reminder(tg_id, title, _to_local_wall(reminder_start, tz_offset), task_id, tz_offset, recipients=tgids)
-                        restored += 1
-                except Exception as e:
-                    logger.error("restore pass1: task %s error: %s", task.id, e)
-
-            # ── Проход 2: задачи с пропущенным напоминанием ─────────────────────
-            for task in await _pg.active_with_past_reminder(user_id):
-                try:
-                    if await asyncio.to_thread(_care.is_muted, task, tz_offset):
-                        continue            # не «Пропущено» и не сдвиг серии: цикл ведёт ситтер
-                    task_id = task.id
-                    repeat = task.repeat
-                    title = task.title or "Задача"
-                    reminder_start = task.reminder
-                    if not reminder_start:
-                        continue
-
-                    if repeat == "Нет":
-                        # ── Одноразовая задача — отправить "пропущено" СРАЗУ ──
-                        try:
-                            _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
-                            rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
-                                tzinfo=timezone(timedelta(hours=tz_offset))
-                            )
-                            missed_time = rem_dt.strftime("%d.%m в %H:%M")
-                        except ValueError:
-                            missed_time = reminder_start[:16]
-
-                        try:
-                            await _repo.set_in_progress(task_id)
-                        except Exception as e:
-                            logger.warning("restore pass2: failed to set In progress for '%s': %s", title, e)
-                        kb = InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-                            ],
-                            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
-                        ])
-                        _first = None
-                        for _tg in tgids:
-                            try:
-                                _m = await _bot.send_message(
-                                    _tg,
-                                    f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n\nСделано?",
-                                    parse_mode="HTML",
-                                    reply_markup=kb,
-                                )
-                                if _first is None:
-                                    _first = _m
-                            except Exception as e:
-                                logger.warning("restore pass2: send missed '%s' to %s failed: %s", title, _tg, e)
-                        if _first is not None:
-                            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
-                            # Обнуляем напоминание: оно отработало (как missed).
-                            # Иначе _active_with_past_reminder вернёт задачу
-                            # снова при СЛЕДУЮЩЕМ рестарте → дубли «⏰ Пропущено».
-                            await _pg.clear_reminder(task_id)
-                            logger.info("restore pass2: sent missed reminder '%s' (was at %s)", title, missed_time)
-                            restored += 1
-                        else:
-                            logger.error("restore pass2: all targets failed for missed '%s'", title)
-                    else:
-                        if periodic:
-                            # periodic re-arm: пропущенные повторяющиеся не трогаем
-                            # (см. docstring) — подхватит pass 2 на рестарте.
-                            continue
-                        # ── Повторяющаяся задача — СНАЧАЛА сдвинуть, потом увед ──
-                        # Порядок важен: если auto-reload (частые деплои →
-                        # auto-pull + watchfiles) перезапустит процесс между
-                        # send_message и set_props, следующий restore-pass2
-                        # снова увидит reminder в прошлом и пришлёт «⏰ Пропущено»
-                        # ещё раз — тот же спам, что чинили в #206 для одноразовых.
-                        # Двигаем reminder в PG до отправки: даже при краше сразу
-                        # после — следующий рестарт увидит future-reminder (pass1),
-                        # дубля не будет. Максимум потеряем одно «Пропущено» при
-                        # сбое send — приемлемо, следующий цикл всё равно пингнёт.
-                        try:
-                            _rs = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
-                            rem_dt = datetime.strptime(_rs, "%Y-%m-%dT%H:%M").replace(
-                                tzinfo=timezone(timedelta(hours=tz_offset))
-                            )
-                            missed_time = rem_dt.strftime("%d.%m в %H:%M")
-                        except ValueError:
-                            missed_time = reminder_start[:16]
-
-                        # Read interval for display
-                        _, ivl_days_pre = _parse_repeat_time(task.repeat_time)
-                        repeat_display = _interval_label(ivl_days_pre) if ivl_days_pre > 1 else repeat
-
-                        # Сдвигаем до ближайшей будущей даты
-                        canon_time, ivl_days = _parse_repeat_time(task.repeat_time)
-                        new_reminder = _ensure_datetime(_to_local_wall(reminder_start, tz_offset))
-                        for _ in range(400):
-                            new_reminder = _next_cycle_date(
-                                new_reminder, repeat, tz_offset, ivl_days,
-                                override_time=canon_time,
-                            )
-                            try:
-                                _nr = _ensure_datetime(new_reminder[:16])
-                                nrem_dt = datetime.strptime(_nr, "%Y-%m-%dT%H:%M").replace(
-                                    tzinfo=timezone(timedelta(hours=tz_offset))
-                                )
-                            except ValueError:
-                                break
-                            if nrem_dt > now_utc:
-                                break
-
-                        deadline_start = task.deadline
-                        update_props: dict = {"Напоминание": _date_with_tz(new_reminder, tz_offset), "Статус": _status("Not started")}
-                        if deadline_start:
-                            new_deadline = deadline_start[:16]
-                            for _ in range(400):
-                                new_deadline = _next_cycle_date(new_deadline, repeat, tz_offset, ivl_days)
-                                try:
-                                    dl_dt = datetime.strptime(new_deadline[:10], "%Y-%m-%d").replace(
-                                        tzinfo=timezone(timedelta(hours=tz_offset))
-                                    )
-                                except ValueError:
-                                    break
-                                if dl_dt > now_utc:
-                                    break
-                            update_props["Дедлайн"] = _date_with_tz(new_deadline[:10], tz_offset)
-
-                        await _repo.set_props(task_id, update_props)
-                        await _schedule_reminder(tg_id, title, new_reminder, task_id, tz_offset, recipients=tgids)
-
-                        # reminder уже сдвинут в PG — теперь можно слать «Пропущено»
-                        kb = InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                                cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-                            ],
-                            [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
-                        ])
-                        _first = None
-                        for _tg in tgids:
-                            try:
-                                _m = await _bot.send_message(
-                                    _tg,
-                                    f"⏰ <b>Пропущено ({missed_time}):</b> {title}\n"
-                                    f"🔄 Повтор: {repeat_display} — переношу.\n\nСделано?",
-                                    parse_mode="HTML",
-                                    reply_markup=kb,
-                                )
-                                if _first is None:
-                                    _first = _m
-                            except Exception as e:
-                                logger.warning("restore pass2: send missed repeat '%s' to %s failed: %s", title, _tg, e)
-                        if _first is not None:
-                            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
-
-                        logger.info("restore pass2: rescheduled '%s' repeat=%s ivl=%d next=%s deadline=%s",
-                                     title, repeat, ivl_days, new_reminder, deadline_start or "none")
-                        restored += 1
-                except Exception as e:
-                    logger.error("restore pass2: task %s error: %s", task.id, e)
-
-            # ── Проход 3: repeat_time есть, reminder IS NULL — оживление ─────────
-            revived = 0
-            for task in await _pg.active_recurring_without_reminder(user_id):
-                try:
-                    repeat_time_raw = task.repeat_time
-                    if not repeat_time_raw:
-                        continue
-                    time_str, _ivl = _parse_repeat_time(repeat_time_raw)
-                    try:
-                        h, m = map(int, time_str.split(":"))
-                    except Exception:
-                        h, m = 9, 0
-                    user_tz = timezone(timedelta(hours=tz_offset))
-                    now_local = datetime.now(user_tz)
-                    first_run = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
-                    if first_run <= now_local:
-                        first_run = first_run + timedelta(days=1)
-                    new_reminder = first_run.strftime("%Y-%m-%dT%H:%M")
-                    await _repo.set_props(task.id, {"Напоминание": _date_with_tz(new_reminder, tz_offset)})
-                    await _schedule_reminder(tg_id, task.title or "Задача", new_reminder, task.id, tz_offset, recipients=tgids)
-                    revived += 1
-                    logger.info("restore pass3: revived '%s' repeat_time=%s next=%s",
-                                task.title, repeat_time_raw, new_reminder)
-                except Exception as e:
-                    logger.error("restore pass3: task %s error: %s", task.id, e)
-            if revived:
-                logger.info("restore pass3: revived %d recurring tasks without reminder", revived)
-                restored += revived
-
-            # ── Проход 4: будущий дедлайн без напоминания — восстановить пинг ───
-            # Дедлайн-job (#69: ставится только без reminder) нигде не
-            # пересобирался при рестарте — APScheduler теряет его in-memory.
-            for task in await _pg.active_with_future_deadline_no_reminder(user_id):
-                try:
-                    dl = task.deadline
-                    if not dl:
-                        continue
-                    await _schedule_deadline_check(
-                        tg_id, task.title or "Задача",
-                        _to_local_wall(dl, tz_offset), task.id, tz_offset,
-                        recipients=tgids, duration_min=task.duration_min,
-                    )
-                    restored += 1
-                except Exception as e:
-                    logger.error("restore pass4: task %s error: %s", task.id, e)
-
-        except Exception as e:
-            logger.error("restore_reminders_on_startup: tg_id=%s error: %s", tg_id, e)
-
-    logger.info("restore_reminders_on_startup: restored %d reminder jobs", restored)
+    ``periodic=True`` — интервальный re-arm каждые 90 с (#210): APScheduler теряет
+    in-memory job'ы при рестарте, pass 1/3/4 идемпотентны, а pass 2 для повторяющихся
+    в periodic-режиме пропускается (иначе «⏰ Пропущено» сразу после живого «🔔»)."""
+    await _flow.restore(periodic=periodic)
 
 
 def _now(uid: int = 0) -> datetime:
@@ -665,162 +510,18 @@ def _default_reminder(deadline: str, tz_offset: int) -> Optional[str]:
 
 async def _schedule_reminder(chat_id: int, title: str, reminder_dt: str, task_id: str, tz_offset: int = 3,
                              recipients: Optional[List[int]] = None) -> None:
-    if not _scheduler or not _bot:
-        return
-    # recipients — все TG-чаты владельца задачи (два аккаунта Кай делят один
-    # user_id, #202). Раньше restore планировал job per-tg_id с одним job_id
-    # `reminder_<task>` → второй проход replace_existing перетирал первый и
-    # напоминание уходило только в последний чат из allowed_ids. Теперь один
-    # job, а рассылка на fire-time идёт во все чаты.
-    _targets = [t for t in (recipients or [chat_id]) if t]
-    try:
-        reminder_dt = _ensure_datetime(reminder_dt)
-        dt = datetime.strptime(reminder_dt, "%Y-%m-%dT%H:%M").replace(
-            tzinfo=timezone(timedelta(hours=tz_offset))
-        )
-        async def send_reminder() -> None:
-            # Задача могла быть завершена/отменена (в т.ч. из Mini App) уже
-            # ПОСЛЕ того как этот job был поставлен в очередь — колонки БД
-            # источник истины, job — производная и может протухнуть (см.
-            # TASKS.md "reminder/deadline — projections"). Перепроверяем
-            # статус прямо перед отправкой, чтобы не пинговать выполненную
-            # задачу.
-            _cur = None
-            if task_id:
-                try:
-                    _cur = await _repo.retrieve_page(task_id)
-                    if _cur and _cur.status in ("Done", "Archived"):
-                        logger.info("send_reminder: task %s already %s, skipping", task_id, _cur.status)
-                        return
-                except Exception as e:
-                    logger.warning("send_reminder: status check failed: %s", e)
-            # Уход за котами: в период ухода напоминания задач ситтера владельцу молчат (задачу ведёт ситтер; о просрочке
-            # предупредит core.care.send_overdue_alerts). Статус и серия не трогаются.
-            if _cur is not None and await asyncio.to_thread(_care.is_muted, _cur, tz_offset):
-                logger.info("send_reminder: task %s is in the sitter schedule during the care period, muted", task_id)
-                return
-            # Ставим статус "In progress" при срабатывании напоминания
-            try:
-                await _repo.set_in_progress(task_id)
-            except Exception as e:
-                logger.warning("send_reminder: failed to set In progress: %s", e)
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Сделано!", callback_data=f"task_complete_{task_id}"),
-                    cancel_button("❌ Не сделал", f"task_failed_{task_id}"),
-                ],
-                [InlineKeyboardButton(text="⏳ В процессе", callback_data=f"task_wip_{task_id}")],
-            ])
-            _first = None
-            for _t in _targets:
-                try:
-                    _m = await _bot.send_message(
-                        _t,
-                        f"🔔 <b>Напоминание:</b> {title}\n\nСделано?",
-                        parse_mode="HTML",
-                        reply_markup=kb
-                    )
-                    if _first is None:
-                        _first = _m
-                except Exception as e:
-                    logger.warning("send_reminder: send to %s failed: %s", _t, e)
-            if _first is None:
-                logger.error("send_reminder: all targets failed for task %s", task_id)
-                return
-            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
-            # Одноразовое напоминание отработало — обнуляем колонку, иначе
-            # при следующем рестарте restore-pass2 пришлёт «⏰ Пропущено»
-            # дубль (частые auto-reload = спам одним и тем же уведом).
-            # Повторяющиеся не трогаем — их reminder двигает cb-обработчик.
-            _rep = (getattr(_cur, "repeat", "") or "").strip() if _cur else ""
-            if task_id and _rep in ("", "Нет"):
-                try:
-                    await _repo.clear_reminder(task_id)
-                except Exception as e:
-                    logger.warning("send_reminder: clear_reminder failed: %s", e)
+    """Тонкая обёртка над общим движком (core.reminder_scheduler). Имя и сигнатура
+    сохранены: её зовут ~15 мест и патчат тесты."""
+    await _flow.schedule_reminder(chat_id, title, reminder_dt, task_id, tz_offset, recipients=recipients)
 
-        now = _now()
-        if dt <= now:
-            missed_seconds = (now - dt).total_seconds()
-            if missed_seconds <= 120:
-                logger.info("Reminder just passed (%ds ago), sending immediately: %s", missed_seconds, title)
-                await send_reminder()
-            else:
-                logger.warning("Reminder in the past (%ds ago), skipping: %s", missed_seconds, reminder_dt)
-            return
-
-        job_id = f"reminder_{task_id}" if task_id else f"rem_{chat_id}_{title[:15]}_{reminder_dt}"
-        logger.info("scheduling reminder: task_id=%s targets=%s job_id=%s callback_data=task_complete_%s", task_id, _targets, job_id, task_id)
-        _scheduler.add_job(send_reminder, trigger="date", run_date=dt,
-                           id=job_id, replace_existing=True)
-        logger.info("Reminder scheduled: %s at %s", title, dt)
-    except Exception as e:
-        logger.error("Schedule reminder error: %s", e)
 
 async def _schedule_deadline_check(chat_id: int, title: str, deadline_dt: str, task_id: str, tz_offset: int = 3,
                                    recipients: Optional[List[int]] = None,
                                    duration_min: Optional[int] = None) -> None:
-    if not _scheduler or not _bot:
-        return
-    _targets = [t for t in (recipients or [chat_id]) if t]
-    try:
-        deadline_dt = _ensure_datetime(deadline_dt)
-        dt = datetime.strptime(deadline_dt, "%Y-%m-%dT%H:%M").replace(
-            tzinfo=timezone(timedelta(hours=tz_offset))
-        )
-        if duration_min:
-            # deadline — начало дела («с 14 до 17» → deadline=14:00,
-            # duration=3ч, как в booking busy-view #241). Спрашивать «Сделал?»
-            # ровно в момент начала — рано, дело ещё длится; сдвигаем на конец.
-            dt = dt + timedelta(minutes=duration_min)
-        if dt <= _now():
-            logger.warning("Deadline in the past: %s", deadline_dt)
-            return
+    """Тонкая обёртка над общим движком; ``duration_min`` сдвигает пинг на конец дела."""
+    await _flow.schedule_deadline_check(chat_id, title, deadline_dt, task_id, tz_offset,
+                                        recipients=recipients, duration_min=duration_min)
 
-        async def check_deadline() -> None:
-            # См. комментарий в send_reminder() — та же перепроверка статуса
-            # перед отправкой, job может протухнуть если задачу закрыли
-            # раньше (напр. из Mini App).
-            if task_id:
-                try:
-                    _cur = await _repo.retrieve_page(task_id)
-                    if _cur and _cur.status in ("Done", "Archived"):
-                        logger.info("check_deadline: task %s already %s, skipping", task_id, _cur.status)
-                        return
-                except Exception as e:
-                    logger.warning("check_deadline: status check failed: %s", e)
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Выполнено!", callback_data=f"task_complete_{task_id}"),
-                    InlineKeyboardButton(text="⏳ Отложить", callback_data=f"task_reschedule_{task_id}"),
-                ],
-                [InlineKeyboardButton(text="🔧 В процессе", callback_data=f"task_wip_{task_id}")],
-            ])
-            _first = None
-            for _t in _targets:
-                try:
-                    _m = await _bot.send_message(
-                        _t,
-                        f"⏰ <b>Дедлайн:</b> {title}\n\nСделал?",
-                        parse_mode="HTML",
-                        reply_markup=kb
-                    )
-                    if _first is None:
-                        _first = _m
-                except Exception as e:
-                    logger.warning("check_deadline: send to %s failed: %s", _t, e)
-            if _first is None:
-                logger.error("check_deadline: all targets failed for task %s", task_id)
-                return
-            await save_task_reminder(task_id, _first.chat.id, _first.message_id, title)
-
-        job_id = f"deadline_{task_id}" if task_id else f"deadline_{chat_id}_{title[:15]}_{deadline_dt}"
-        logger.info("scheduling deadline: task_id=%s targets=%s job_id=%s callback_data=task_complete_%s", task_id, _targets, job_id, task_id)
-        _scheduler.add_job(check_deadline, trigger="date", run_date=dt,
-                           id=job_id, replace_existing=True)
-        logger.info("Deadline check scheduled: %s at %s", title, dt)
-    except Exception as e:
-        logger.error("Schedule deadline error: %s", e)
 
 async def _get_user_tz(uid: int) -> int:
     """tz пользователя из единого источника (core.location, #170)."""

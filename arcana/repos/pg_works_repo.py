@@ -378,6 +378,52 @@ class PgWorksRepo:
             rows = conn.execute(stmt).fetchall()
         return [_row_to_work(r) for r in rows]
 
+    def _open_stmt(self, user_id: str):
+        """Не done/archived Работы (+ фильтр по владельцу) — основа выборок restore."""
+        stmt = _select_works().where(work_status.c.code.notin_(_TERMINAL_STATUS))
+        if user_id:
+            stmt = stmt.where(works.c.user_id == user_id)
+        return stmt
+
+    def _fetch_sync(self, stmt) -> List[Work]:
+        with get_engine().connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [_row_to_work(r) for r in rows]
+
+    def _active_with_past_reminder_sync(self, user_id: str, now: datetime) -> List[Work]:
+        """Открытые Работы с ПРОШЕДШИМ напоминанием (restore pass 2 → «⏰ Пропущено»)."""
+        stmt = (self._open_stmt(user_id)
+                .where(works.c.reminder.isnot(None))
+                .where(works.c.reminder < now))
+        return self._fetch_sync(stmt)
+
+    def _active_recurring_without_reminder_sync(self, user_id: str) -> List[Work]:
+        """Открытые Работы с repeat_time, но без reminder (restore pass 3 — оживление серии)."""
+        stmt = (self._open_stmt(user_id)
+                .where(works.c.repeat_time.isnot(None))
+                .where(works.c.repeat_time != "")
+                .where(works.c.reminder.is_(None)))
+        return self._fetch_sync(stmt)
+
+    def _active_with_future_deadline_no_reminder_sync(self, user_id: str, now: datetime) -> List[Work]:
+        """Открытые Работы с будущим дедлайном и БЕЗ напоминания (restore pass 4, #212):
+        дедлайн-пинг ставится только когда reminder нет (#69) и теряется при рестарте."""
+        stmt = (self._open_stmt(user_id)
+                .where(works.c.deadline.isnot(None))
+                .where(works.c.deadline > now)
+                .where(works.c.reminder.is_(None)))
+        return self._fetch_sync(stmt)
+
+    def _set_reminder_sync(self, work_id: str, reminder: Optional[datetime]) -> bool:
+        """reminder=None — обнулить (напоминание отработало: живое или «Пропущено»)."""
+        try:
+            wid = int(work_id)
+        except (ValueError, TypeError):
+            return False
+        with get_engine().begin() as conn:
+            res = conn.execute(works.update().where(works.c.id == wid).values(reminder=reminder))
+        return res.rowcount > 0
+
     def _set_status_sync(self, work_id: str, status_code: str) -> bool:
         try:
             wid = int(work_id)
@@ -395,14 +441,17 @@ class PgWorksRepo:
             )
         return res.rowcount > 0
 
-    def _set_deadline_sync(self, work_id: str, new_date: date) -> bool:
+    def _set_deadline_sync(self, work_id: str, new_date: date, tz_offset: Optional[int] = None) -> bool:
         try:
             wid = int(work_id)
         except (ValueError, TypeError):
             return False
+        # «Без времени» = полночь ЛОКАЛЬНОГО дня (как при создании, #267/#272): только
+        # так дата не съезжает в показе и дедлайн-пинг уходит в 09:00, а не в 03:00.
+        # Без tz_offset — прежнее поведение (UTC-полночь) для вызывающих без пояса.
         new_dt = datetime(
             new_date.year, new_date.month, new_date.day, 0, 0, 0,
-            tzinfo=timezone.utc,
+            tzinfo=timezone(timedelta(hours=tz_offset)) if tz_offset is not None else timezone.utc,
         )
         with get_engine().begin() as conn:
             cur = conn.execute(
@@ -530,6 +579,23 @@ class PgWorksRepo:
 
     # ── Public async interface ────────────────────────────────────────────────
 
+    async def active_with_past_reminder(self, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(
+            self._active_with_past_reminder_sync, user_id, datetime.now(timezone.utc))
+
+    async def active_recurring_without_reminder(self, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(self._active_recurring_without_reminder_sync, user_id)
+
+    async def active_with_future_deadline_no_reminder(self, user_id: str = "") -> List[Work]:
+        return await asyncio.to_thread(
+            self._active_with_future_deadline_no_reminder_sync, user_id, datetime.now(timezone.utc))
+
+    async def clear_reminder(self, work_id: str) -> bool:
+        return await asyncio.to_thread(self._set_reminder_sync, work_id, None)
+
+    async def set_reminder(self, work_id: str, reminder: datetime) -> bool:
+        return await asyncio.to_thread(self._set_reminder_sync, work_id, reminder)
+
     async def list_open(self, user_id: str = "") -> List[Work]:
         return await asyncio.to_thread(self._list_open_sync, user_id)
 
@@ -558,8 +624,8 @@ class PgWorksRepo:
     async def set_status(self, work_id: str, status_code: str) -> bool:
         return await asyncio.to_thread(self._set_status_sync, work_id, status_code)
 
-    async def set_deadline(self, work_id: str, new_date: date) -> bool:
-        return await asyncio.to_thread(self._set_deadline_sync, work_id, new_date)
+    async def set_deadline(self, work_id: str, new_date: date, tz_offset: Optional[int] = None) -> bool:
+        return await asyncio.to_thread(self._set_deadline_sync, work_id, new_date, tz_offset)
 
     async def create(
         self,

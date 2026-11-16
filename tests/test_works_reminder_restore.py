@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import BigInteger, Column, Table, create_engine, event
@@ -21,6 +21,16 @@ from arcana.repos.works_tables import (
 )
 from arcana.repos.works_repo import Work
 import arcana.repos.pg_works_repo as pgw
+
+
+def _kw(mock) -> dict:
+    """Аргументы последнего await schedule_reminder по ИМЕНАМ параметров: общий движок
+    зовёт его позиционно (так же, как Nexus), тесты от формы вызова не зависят."""
+    import inspect
+    from core.reminder_scheduler import ReminderScheduler
+    call = mock.await_args
+    bound = inspect.signature(ReminderScheduler.schedule_reminder).bind(None, *call.args, **call.kwargs)
+    return dict(bound.arguments)
 
 
 # ── filter test (реальный SQL на in-memory sqlite) ───────────────────────────
@@ -91,13 +101,15 @@ async def test_restore_reschedules_with_matching_key():
          patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(pgw.PgWorksRepo, "active_with_future_reminder",
                       AsyncMock(return_value=[w])), \
+         patch.object(abot.arcana_reminder_flow, "_bot", MagicMock()), \
+         patch.object(abot.arcana_reminder_flow, "_scheduler", MagicMock()), \
          patch.object(abot.arcana_reminder_flow, "schedule_reminder",
                       AsyncMock(return_value=True)) as m_sched:
         n = await abot.restore_work_reminders()
 
     assert n == 1
     m_sched.assert_awaited_once()
-    kwargs = m_sched.await_args.kwargs
+    kwargs = _kw(m_sched)
     # КЛЮЧ: page_id = str(work.id) — тот же, что ставит cb_work_save → reminder_{id}
     assert kwargs["page_id"] == "42"
     assert kwargs["chat_id"] == 7
@@ -136,6 +148,8 @@ async def test_restore_fans_out_to_all_tg_ids_of_same_user(monkeypatch):
          patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(pgw.PgWorksRepo, "active_with_future_reminder",
                       AsyncMock(return_value=[w])), \
+         patch.object(abot.arcana_reminder_flow, "_bot", MagicMock()), \
+         patch.object(abot.arcana_reminder_flow, "_scheduler", MagicMock()), \
          patch.object(abot.arcana_reminder_flow, "schedule_reminder",
                       AsyncMock(return_value=True)) as m_sched:
         n = await abot.restore_work_reminders()
@@ -144,7 +158,7 @@ async def test_restore_fans_out_to_all_tg_ids_of_same_user(monkeypatch):
     # ОДИН вызов на Работу (не по разу на каждый tg_id — иначе replace_existing
     # job_id перетирает предыдущий и второй аккаунт никогда её не видит).
     m_sched.assert_awaited_once()
-    kwargs = m_sched.await_args.kwargs
+    kwargs = _kw(m_sched)
     assert kwargs["chat_id"] == 111  # primary = первый tg_id группы
     assert sorted(kwargs["recipients"]) == [111, 222]  # но уходит в ОБА чата
 
@@ -159,6 +173,8 @@ async def test_restore_skips_non_arcana_user():
                AsyncMock(return_value={"permissions": {"arcana": False}})), \
          patch.object(pgw.PgWorksRepo, "active_with_future_reminder",
                       AsyncMock(return_value=[])) as m_q, \
+         patch.object(abot.arcana_reminder_flow, "_bot", MagicMock()), \
+         patch.object(abot.arcana_reminder_flow, "_scheduler", MagicMock()), \
          patch.object(abot.arcana_reminder_flow, "schedule_reminder",
                       AsyncMock()) as m_sched:
         n = await abot.restore_work_reminders()
@@ -182,6 +198,8 @@ async def test_restore_utc_reminder_1930_msk_is_not_shifted():
                AsyncMock(return_value={"permissions": {"arcana": True}, "user_id": "u-1"})), \
          patch("core.shared_handlers.get_user_tz", AsyncMock(return_value=3)), \
          patch.object(pgw.PgWorksRepo, "active_with_future_reminder", AsyncMock(return_value=[w])), \
+         patch.object(abot.arcana_reminder_flow, "_bot", MagicMock()), \
+         patch.object(abot.arcana_reminder_flow, "_scheduler", MagicMock()), \
          patch.object(abot.arcana_reminder_flow, "schedule_reminder", AsyncMock(return_value=True)) as m:
         await abot.restore_work_reminders()
-    assert m.await_args.kwargs["reminder_dt"] == "2026-11-01T19:30"
+    assert _kw(m)["reminder_dt"] == "2026-11-01T19:30"

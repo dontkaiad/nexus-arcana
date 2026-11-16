@@ -509,7 +509,7 @@ async def test_restore_pass3_revives_recurring_without_reminder():
     with patch.object(tasks, "_scheduler", fake_scheduler), \
          patch.object(tasks, "_bot", fake_bot), \
          patch.object(tasks._repo, "set_props", AsyncMock(side_effect=fake_set_props)), \
-         patch.object(tasks, "_schedule_reminder", fake_schedule), \
+         patch.object(tasks._flow, "schedule_reminder", fake_schedule), \
          patch.object(tasks, "_get_user_tz", AsyncMock(return_value=3)), \
          patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
          patch("core.user_manager.get_user",
@@ -573,7 +573,7 @@ async def test_reschedule_all_for_tz_preserves_local_clock_time():
     fake_scheduler = MagicMock()
 
     with patch.object(tasks._repo, "set_props", AsyncMock(side_effect=fake_set_props)), \
-         patch.object(tasks, "_schedule_reminder", fake_schedule), \
+         patch.object(tasks._flow, "schedule_reminder", fake_schedule), \
          patch.object(tasks, "_scheduler", fake_scheduler), \
          patch("nexus.repos.pg_tasks_repo.PgTasksRepo", return_value=fake_pg), \
          patch("core.user_manager.get_user",
