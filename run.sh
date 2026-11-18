@@ -1,6 +1,17 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-source venv/bin/activate
+source .venv312/bin/activate
+
+# Прод (python:3.12-slim) и тесты идут на 3.12 — не стартуем молча на другом Python.
+PY_VERSION="$(python --version 2>&1)"
+case "$PY_VERSION" in
+    "Python 3.12."*) ;;
+    *)
+        echo "❌ Нужен Python 3.12, а в .venv312 сейчас: ${PY_VERSION:-python не найден}."
+        echo "   Пересобери: uv venv --python 3.12 .venv312 && uv pip install --python .venv312/bin/python -r requirements-dev.txt"
+        exit 1
+        ;;
+esac
 
 PYTHON="$(which python3)"
 
