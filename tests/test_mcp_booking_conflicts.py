@@ -122,6 +122,9 @@ def test_only_bookings_that_hold_a_slot_count(status, counts):
     assert bool(new_task("10:00")["conflicts"]) is counts
 
 
+# real_clock: list_bookings(upcoming_only=True) режет по sa.func.now() — часам Postgres, их freezegun не замораживает.
+# На замороженных часах «идущая сейчас» бронь (09:00 ± 30 мин) для БД уже закончилась, как только настоящее время > 09:30 UTC.
+@pytest.mark.real_clock
 def test_a_past_booking_does_not_count_but_one_in_progress_does():
     past_start = (datetime.now(timezone.utc) - timedelta(hours=3)).replace(second=0, microsecond=0)
     make_booking(past_start, past_start + timedelta(hours=1))                                     # уже закончилась
