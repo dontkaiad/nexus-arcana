@@ -862,3 +862,166 @@ async def test_no_self_notify_for_owner_booking(who, notified):
     assert no.await_count == (1 if notified else 0)
     if notified:
         assert no.call_args[0][0].startswith("⭐ Новая бронь: <b>Рома</b>")
+
+
+# ── reply на бронь задаёт цель встречи ──────────────────────────────────────
+
+_BOT_ID = 999
+
+
+def _booking_obj(**over):
+    from core.booking.repo import Booking
+    start = datetime(2026, 9, 14, 11, 0, tzinfo=UTC)
+    base = dict(
+        id=7, context="friends", meeting_type_id=None, requester_tg_id=42,
+        requester_name="Тучка", requester_contact="", start_at=start,
+        end_at=start + timedelta(hours=2), hours=2.0, status="confirmed", note="старое",
+        source="tg_dm", token="t", nexus_task_id="11", arcana_work_id=None,
+        created_at=None, decided_at=None, user_id="uid",
+    )
+    base.update(over)
+    return Booking(**base)
+
+
+def _reply_msg(text="шашлыки", *, markup="booking", sender_id=_BOT_ID, user_id=42):
+    from zarya.handlers import _cancel_kb
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    if markup == "booking":
+        markup = _cancel_kb(7)
+    elif markup == "other":
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="19:00", callback_data="z:slot:friends:123")]])
+    m = _msg()
+    m.text = text
+    m.from_user = SimpleNamespace(id=user_id, full_name="Кто-то")
+    m.bot = SimpleNamespace(id=_BOT_ID)
+    m.reply_to_message = SimpleNamespace(
+        from_user=SimpleNamespace(id=sender_id), reply_markup=markup, edit_text=AsyncMock())
+    return m
+
+
+def test_booking_reply_filter_extracts_id_from_cancel_button():
+    from zarya.handlers import _is_booking_reply
+    assert _is_booking_reply(_reply_msg()) == {"booking_id": 7}
+
+
+@pytest.mark.parametrize("kw", [
+    {"markup": "other"},          # reply на сообщение со слотами — не бронь
+    {"markup": None},             # reply на обычный ответ бота
+    {"sender_id": 5},             # reply на сообщение другого человека
+    {"text": "/slots"},           # команда
+])
+def test_booking_reply_filter_ignores_non_booking_replies(kw):
+    from zarya.handlers import _is_booking_reply
+    assert _is_booking_reply(_reply_msg(**kw)) is False
+
+
+def test_booking_reply_filter_ignores_plain_message():
+    from zarya.handlers import _is_booking_reply
+    m = _reply_msg()
+    m.reply_to_message = None
+    assert _is_booking_reply(m) is False
+
+
+def test_booking_reply_handler_registered_right_after_purpose_before_slots():
+    from zarya import handlers
+    order = [h.callback for h in handlers.router.message.handlers]
+    i_purpose = order.index(handlers.on_purpose_text)
+    i_reply = order.index(handlers.on_booking_reply)
+    assert i_reply == i_purpose + 1
+    assert i_reply < order.index(handlers.nl_slots) < order.index(handlers.on_unrecognized)
+
+
+def _patch_reply_deps(b):
+    return (
+        patch("zarya.handlers.get_booking", AsyncMock(return_value=b)),
+        patch("zarya.handlers.set_booking_note", AsyncMock(side_effect=lambda bid, note: _booking_obj(note=note))),
+        patch("zarya.handlers.update_linked_title", AsyncMock()),
+        patch("zarya.handlers._notify_owner", AsyncMock()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_booking_reply_by_requester_sets_note_and_retitles_task():
+    from zarya.handlers import on_booking_reply
+    m = _reply_msg("шашлыки на даче")
+    g, s, u, n = _patch_reply_deps(_booking_obj())
+    with g, s as set_note, u as retitle, n as notify:
+        await on_booking_reply(m, booking_id=7, role="friend", tg_id=42)
+    set_note.assert_awaited_once_with(7, "шашлыки на даче")
+    retitle.assert_awaited_once()
+    assert retitle.call_args[0][0].note == "шашлыки на даче"
+    edit = m.reply_to_message.edit_text
+    assert edit.call_args[0][0] == "✅ пн 14.09 14:00–16:00\n💬 шашлыки на даче"
+    assert edit.call_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "z:cx:7"
+    m.answer.assert_awaited_once_with("Дописала 💅")
+    notify.assert_awaited_once()  # друг правит цель → Кай в курсе
+    assert "шашлыки на даче" in notify.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_booking_reply_by_admin_does_not_notify_owner():
+    from zarya.handlers import on_booking_reply
+    m = _reply_msg("созвон", user_id=1)
+    g, s, u, n = _patch_reply_deps(_booking_obj())  # requester — другой человек (42)
+    with g, s as set_note, u, n as notify:
+        await on_booking_reply(m, booking_id=7, role="admin", tg_id=1)
+    set_note.assert_awaited_once_with(7, "созвон")
+    notify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_booking_reply_by_stranger_is_refused():
+    from zarya.handlers import on_booking_reply
+    m = _reply_msg("взлом", user_id=555)
+    g, s, u, n = _patch_reply_deps(_booking_obj())
+    with g, s as set_note, u as retitle, n as notify:
+        await on_booking_reply(m, booking_id=7, role="friend", tg_id=555)
+    set_note.assert_not_awaited()
+    retitle.assert_not_awaited()
+    notify.assert_not_awaited()
+    m.reply_to_message.edit_text.assert_not_awaited()
+    assert "не твоя" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_booking_reply_on_cancelled_booking_is_refused():
+    from zarya.handlers import on_booking_reply
+    m = _reply_msg()
+    g, s, u, n = _patch_reply_deps(_booking_obj(status="cancelled_by_owner"))
+    with g, s as set_note, u, n:
+        await on_booking_reply(m, booking_id=7, role="admin", tg_id=1)
+    set_note.assert_not_awaited()
+    assert "неактуальна" in m.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_booking_reply_truncates_collapses_whitespace_and_escapes_html():
+    from zarya.handlers import on_booking_reply
+    m = _reply_msg("<b>я\n  и   ты</b> " + "а" * 300)
+    g, s, u, n = _patch_reply_deps(_booking_obj())
+    with g, s as set_note, u, n:
+        await on_booking_reply(m, booking_id=7, role="friend", tg_id=42)
+    saved = set_note.call_args[0][1]
+    assert len(saved) == 200 and saved.startswith("<b>я и ты</b> а")
+    shown = m.reply_to_message.edit_text.call_args[0][0]
+    assert "<b>" not in shown and "&lt;b&gt;я и ты&lt;/b&gt;" in shown
+
+
+@pytest.mark.asyncio
+async def test_booking_reply_survives_edit_failure():
+    from zarya.handlers import on_booking_reply
+    m = _reply_msg()
+    m.reply_to_message.edit_text = AsyncMock(side_effect=RuntimeError("message is not modified"))
+    g, s, u, n = _patch_reply_deps(_booking_obj())
+    with g, s, u, n:
+        await on_booking_reply(m, booking_id=7, role="friend", tg_id=42)
+    m.answer.assert_awaited_once_with("Дописала 💅")
+
+
+@pytest.mark.asyncio
+async def test_help_mentions_reply_to_booking_for_every_role():
+    for role in ("admin", "friend", "guest"):
+        m = _msg()
+        await cmd_help(m, role=role)
+        assert "Ответь на бронь — допишу цель" in m.answer.call_args[0][0]

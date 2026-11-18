@@ -122,6 +122,14 @@ def _reschedule_sync(engine, booking_id: int, start_at: datetime, end_at: dateti
     return _row_to_booking(row) if row else None
 
 
+def _set_note_sync(engine, booking_id: int, note: str) -> Optional[Booking]:
+    with engine.begin() as conn:
+        row = conn.execute(
+            booking.update().where(booking.c.id == booking_id).values(note=note).returning(booking)
+        ).first()
+    return _row_to_booking(row) if row else None
+
+
 def _get_by_link_sync(
     engine, *, nexus_task_id: Optional[str] = None, arcana_work_id: Optional[str] = None,
 ) -> Optional[Booking]:
@@ -197,6 +205,13 @@ async def list_bookings(
 async def set_booking_status(booking_id: int, status: str, *, engine=None) -> Optional[Booking]:
     eng = engine or _engine()
     return await asyncio.to_thread(_set_status_sync, eng, booking_id, status)
+
+
+async def set_booking_note(booking_id: int, note: str, *, engine=None) -> Optional[Booking]:
+    """Заменить цель встречи (`note`) уже созданной брони. Не трогает статус —
+    заголовок линкованной задачи обновляется отдельно (linkage.update_linked_title)."""
+    eng = engine or _engine()
+    return await asyncio.to_thread(_set_note_sync, eng, booking_id, note)
 
 
 async def get_booking_by_link(
@@ -399,7 +414,7 @@ async def del_block(row_id: int, user_id: str, *, engine=None) -> bool:
 __all__ = [
     "Booking", "BLOCKING_BOOKING_STATUSES",
     "create_booking", "get_booking", "get_booking_by_link", "list_bookings", "set_booking_status",
-    "reschedule_booking",
+    "reschedule_booking", "set_booking_note",
     "list_availability", "add_availability", "edit_availability", "del_availability",
     "list_meeting_types", "add_meeting_type", "edit_meeting_type", "del_meeting_type",
     "list_blocks", "add_block", "del_block", "set_booking_link",

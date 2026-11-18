@@ -8,6 +8,7 @@ the public view and a nudge. Group chats: only replies to /commands, an
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -22,11 +23,11 @@ from aiogram.types import (
 from core.auth_grants import booking_role
 from core import login_tokens as login_tokens_mod
 from core.booking.busy import busy_intervals, merge_intervals
-from core.booking.linkage import link_booking, unlink_booking
+from core.booking.linkage import link_booking, unlink_booking, update_linked_title
 from core.booking import trip as trip_mod
 from core.booking.pending_purpose import get_pending, pop_pending, set_pending
 from core.booking.repo import (
-    create_booking, get_booking, list_bookings, set_booking_status,
+    create_booking, get_booking, list_bookings, set_booking_note, set_booking_status,
 )
 from core.booking.slots import free_slots
 from core.config import config
@@ -228,6 +229,73 @@ async def on_purpose_text(msg: Message, role: str = "guest") -> None:
     )
 
 
+# ── reply на бронь = цель встречи ────────────────────────────────────────────
+# ЗАРЕГИСТРИРОВАН СРАЗУ ПОСЛЕ on_purpose_text и ДО nl_slots / on_unrecognized — иначе
+# «шашлыки» в ответ на бронь уйдёт в показ слотов. Id брони берём из кнопки
+# «❌ Отменить бронь» (callback_data `z:cx:{id}`) на сообщении, на которое ответили —
+# отдельная таблица mapping не нужна.
+
+_NOTE_MAX = 200
+
+
+def _booking_id_from_markup(markup) -> Optional[int]:
+    for row in getattr(markup, "inline_keyboard", None) or []:
+        for btn in row:
+            data = getattr(btn, "callback_data", None) or ""
+            if data.startswith("z:cx:"):
+                try:
+                    return int(data.split(":")[2])
+                except (ValueError, IndexError):
+                    return None
+    return None
+
+
+def _is_booking_reply(message: Message):
+    """Reply на сообщение ЭТОГО бота с кнопкой отмены брони → {"booking_id": id}."""
+    reply = getattr(message, "reply_to_message", None)
+    if not reply or not message.from_user:
+        return False
+    sender = getattr(reply, "from_user", None)
+    if not sender or sender.id != message.bot.id:
+        return False
+    text = getattr(message, "text", None) or ""
+    if not text.strip() or text.lstrip().startswith("/"):
+        return False
+    bid = _booking_id_from_markup(getattr(reply, "reply_markup", None))
+    return {"booking_id": bid} if bid else False
+
+
+@router.message(_is_booking_reply)
+async def on_booking_reply(msg: Message, booking_id: int, role: str = "guest", tg_id: int = 0) -> None:
+    b = await get_booking(booking_id=booking_id)
+    if not b:
+        await msg.answer("Не нашла эту бронь 💅")
+        return
+    if b.status not in ("pending", "confirmed"):
+        await msg.answer("Бронь уже неактуальна 💅")
+        return
+    is_owner = role == "admin"
+    if not (is_owner or (tg_id and tg_id == b.requester_tg_id)):
+        await msg.answer("Это не твоя бронь 🙂")
+        return
+    note = " ".join((msg.text or "").split())[:_NOTE_MAX].rstrip()
+    b2 = await set_booking_note(booking_id, note) or b
+    await update_linked_title(b2)
+    when = slot_label(b2.start_at, hours=b2.hours or 1)
+    try:
+        await msg.reply_to_message.edit_text(
+            f"✅ {when}\n💬 {html.escape(note)}", reply_markup=_cancel_kb(booking_id),
+        )
+    except Exception as e:  # noqa: BLE001 — сообщение могло устареть / текст не изменился
+        logger.info("booking #%s reply edit failed: %s", booking_id, e)
+    await msg.answer("Дописала 💅")
+    if not is_owner:
+        await _notify_owner(
+            f"⭐ <b>{html.escape(b2.requester_name)}</b> уточнил(а) цель · {when}\n💬 {html.escape(note)}",
+            bot=msg.bot,
+        )
+
+
 # ── «уезжаю с X по Y» (только admin): блок в букинге + задача «Выбрать ситтера для котов» ───────────
 
 _TRIP_ERRORS = {
@@ -427,7 +495,8 @@ async def cmd_help(msg: Message, role: str = "guest") -> None:
             "Или через браузер — <a href=\"https://booking.heylark.dev\">booking.heylark.dev</a> "
             "(там же настройки окон).\n\n"
             "Подтверждённым — напоминаю за сутки и за 2 часа, обеим сторонам. "
-            "Отмена — кнопкой у брони, с обеих сторон.\n\n"
+            "Отмена — кнопкой у брони, с обеих сторон.\n"
+            "Ответь на бронь — допишу цель.\n\n"
             "И вообще — можешь просто поболтать со мной, не только по делу 💅"
         )
         return
@@ -443,7 +512,8 @@ async def cmd_help(msg: Message, role: str = "guest") -> None:
         "Выбираешь слот → жмёшь кнопку → готово, я записала.\n\n"
         "Или удобнее через браузер — <a href=\"https://booking.heylark.dev\">booking.heylark.dev</a>, "
         "как тебе больше нравится.\n\n"
-        "Захочешь отменить — кнопка «❌ Отменить бронь» будет прямо у записи."
+        "Захочешь отменить — кнопка «❌ Отменить бронь» будет прямо у записи.\n"
+        "Ответь на бронь — допишу цель."
         + tail
     )
 
@@ -639,7 +709,8 @@ async def _do_book(ctx: str, ep: str, hours: float, role: str, *,
     purpose_line = f"\n💬 {purpose}" if purpose else ""
     if status == "confirmed":
         await reply(
-            f"✅ Записала: {when}{purpose_line}\nНапомню за сутки и за 2 часа 💫",
+            f"✅ Записала: {when}{purpose_line}\nНапомню за сутки и за 2 часа 💫\n"
+            "Ответь на бронь — допишу цель.",
             reply_markup=_cancel_kb(b.id),
         )
         await _confirm_flow(b, bot)

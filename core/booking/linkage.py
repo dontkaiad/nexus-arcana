@@ -33,16 +33,20 @@ def _engine():
     return get_engine()
 
 
+def _friends_title(b: Booking) -> str:
+    # #239: заголовок = ПОВОД встречи (обязателен для друзей — Кай
+    # хочет видеть "шашлыки", а не безликое "Встреча: Ваня"), имя —
+    # в заметке вместе с технической меткой брони.
+    purpose = (b.note or "").strip()
+    return f"☀️ {purpose}" if purpose else f"☀️ Встреча: {b.requester_name}"
+
+
 def _link_sync(eng, b: Booking):
     uid = b.user_id or None
     if b.context == "friends":
         from nexus.repos.tasks_tables import task_status, tasks
 
-        # #239: заголовок = ПОВОД встречи (обязателен для друзей — Кай
-        # хочет видеть "шашлыки", а не безликое "Встреча: Ваня"), имя —
-        # в заметке вместе с технической меткой брони.
-        purpose = (b.note or "").strip()
-        title = f"☀️ {purpose}" if purpose else f"☀️ Встреча: {b.requester_name}"
+        title = _friends_title(b)
         task_note = f"с {b.requester_name} · бронь #{b.id} · {b.hours or 1:g} ч · {b.source}"
         # #249: длительность брони → duration_min задачи (busy-калькулятор,
         # core/booking/busy.py, брал раньше жёсткий 1ч на любую задачу — #241).
@@ -189,6 +193,27 @@ async def update_linked_time(b: Booking, *, engine=None) -> None:
         logger.info("booking #%s retimed linked task/work → %s", b.id, b.start_at)
     except Exception as e:  # noqa: BLE001
         logger.warning("update_linked_time #%s failed: %s", b.id, e)
+
+
+def _retitle_sync(eng, b: Booking) -> None:
+    from nexus.repos.tasks_tables import tasks
+    with eng.begin() as conn:
+        conn.execute(
+            tasks.update().where(tasks.c.id == int(b.nexus_task_id)).values(title=_friends_title(b))
+        )
+
+
+async def update_linked_title(b: Booking, *, engine=None) -> None:
+    """Цель встречи дописали/поменяли после брони — синкнуть заголовок линкованной
+    Nexus-задачи (только friends: у arcana-Работы заголовок = имя клиента, цель в него
+    не входит). Пусто → «☀️ Встреча: {имя}». Never raises."""
+    if b.context != "friends" or not b.nexus_task_id:
+        return
+    try:
+        await asyncio.to_thread(_retitle_sync, engine or _engine(), b)
+        logger.info("booking #%s retitled linked task #%s", b.id, b.nexus_task_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("update_linked_title #%s failed: %s", b.id, e)
 
 
 # ── booking_block (#249) — тот же паттерн, что confirmed booking → task ──────

@@ -226,3 +226,52 @@ async def test_complete_linked_booking_does_not_touch_already_terminal_status():
     await complete_linked_booking(nexus_task_id=b.nexus_task_id, engine=eng)
     updated = await get_booking(booking_id=b.id, engine=eng)
     assert updated.status == "cancelled_by_owner"
+
+
+# ── reply на бронь: set_booking_note + update_linked_title ──────────────────
+
+def _task_title(eng, task_id):
+    with eng.connect() as c:
+        return c.execute(sa.text("SELECT title FROM tasks WHERE id = :i"), {"i": int(task_id)}).scalar()
+
+
+@pytest.mark.asyncio
+async def test_set_booking_note_updates_row():
+    from core.booking.repo import set_booking_note
+    eng = _engine()
+    b = await _booking(eng, "friends")
+    got = await set_booking_note(b.id, "шашлыки", engine=eng)
+    assert got.note == "шашлыки" and got.status == "confirmed"
+    assert (await get_booking(booking_id=b.id, engine=eng)).note == "шашлыки"
+    assert await set_booking_note(9999, "x", engine=eng) is None
+
+
+@pytest.mark.asyncio
+async def test_update_linked_title_rewrites_friends_task_title():
+    from core.booking.linkage import update_linked_title
+    from core.booking.repo import set_booking_note
+    eng = _engine()
+    b = await link_booking(await _booking(eng, "friends"), engine=eng)
+    assert _task_title(eng, b.nexus_task_id) == "☀️ Встреча: Марина"
+    b2 = await set_booking_note(b.id, "шашлыки", engine=eng)
+    await update_linked_title(b2, engine=eng)
+    assert _task_title(eng, b.nexus_task_id) == "☀️ шашлыки"
+    b3 = await set_booking_note(b.id, "", engine=eng)  # пусто → дефолтный заголовок
+    await update_linked_title(b3, engine=eng)
+    assert _task_title(eng, b.nexus_task_id) == "☀️ Встреча: Марина"
+
+
+@pytest.mark.asyncio
+async def test_update_linked_title_skips_arcana_and_unlinked_and_never_raises():
+    from core.booking.linkage import update_linked_title
+    eng = _engine()
+    arc = await link_booking(await _booking(eng, "arcana"), engine=eng)
+    await update_linked_title(arc, engine=eng)  # не friends → no-op
+    with eng.connect() as c:
+        assert c.execute(sa.text("SELECT title FROM works WHERE id = :i"),
+                         {"i": int(arc.arcana_work_id)}).scalar() == "🔮 Марина"
+    await update_linked_title(await _booking(eng, "friends"), engine=eng)  # без задачи — no-op
+    broken = (await link_booking(await _booking(eng, "friends"), engine=eng))
+    with eng.begin() as c:
+        c.execute(sa.text("DROP TABLE tasks"))
+    await update_linked_title(broken, engine=eng)  # БД сломана — не бросает
